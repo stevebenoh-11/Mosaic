@@ -9,3 +9,4 @@ playwright-report
 screenshots
 .DS_Store
 dist-electron
+.env.example
