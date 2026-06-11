@@ -24,6 +24,8 @@ interface AppState {
   elements: Record<string, Element>;
   currentBoardId: string | null;
   selection: string[];
+  /** Element currently in text-edit mode (note/title/todo…). */
+  editingElementId: string | null;
   viewport: Viewport;
   saveState: SaveState;
   canUndo: boolean;
@@ -37,7 +39,13 @@ interface AppState {
   /** End the current text-editing session so further edits are a new undo step. */
   breakCoalescing(): void;
   setSelection(ids: string[]): void;
+  setEditing(id: string | null): void;
   setViewport(v: Viewport): void;
+  /**
+   * Transient updates during drag/resize previews: bypasses history and
+   * persistence. The interaction commits a real command on completion.
+   */
+  updateEphemeral(patches: Record<string, Partial<Element>>): void;
 }
 
 export const history = new History();
@@ -84,6 +92,7 @@ export const useStore = create<AppState>((set, get) => {
     elements: {},
     currentBoardId: null,
     selection: [],
+    editingElementId: null,
     viewport: DEFAULT_VIEWPORT,
     saveState: 'saved',
     canUndo: false,
@@ -104,7 +113,13 @@ export const useStore = create<AppState>((set, get) => {
       for (const e of rows) elements[e.id] = e;
       const viewport =
         (await getMeta<Viewport>(`viewport:${boardId}`)) ?? DEFAULT_VIEWPORT;
-      set({ currentBoardId: boardId, elements, selection: [], viewport });
+      set({
+        currentBoardId: boardId,
+        elements,
+        selection: [],
+        editingElementId: null,
+        viewport,
+      });
     },
 
     execute(cmd) {
@@ -115,13 +130,20 @@ export const useStore = create<AppState>((set, get) => {
 
     undo() {
       const cmd = history.popUndo();
-      if (cmd) applyChanges(invertCommand(cmd).changes);
+      if (cmd) {
+        applyChanges(invertCommand(cmd).changes);
+        // External state change would fight an open editor — close it.
+        set({ editingElementId: null });
+      }
       syncHistoryFlags();
     },
 
     redo() {
       const cmd = history.popRedo();
-      if (cmd) applyChanges(cmd.changes);
+      if (cmd) {
+        applyChanges(cmd.changes);
+        set({ editingElementId: null });
+      }
       syncHistoryFlags();
     },
 
@@ -131,6 +153,20 @@ export const useStore = create<AppState>((set, get) => {
 
     setSelection(ids) {
       set({ selection: ids });
+    },
+
+    setEditing(id) {
+      if (id === null) history.breakCoalescing();
+      set({ editingElementId: id });
+    },
+
+    updateEphemeral(patches) {
+      const elements = { ...get().elements };
+      for (const [id, patch] of Object.entries(patches)) {
+        const e = elements[id];
+        if (e) elements[id] = { ...e, ...patch };
+      }
+      set({ elements });
     },
 
     setViewport(v) {

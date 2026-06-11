@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import { useStore } from '@/store';
 import { Sidebar } from '@/ui/Sidebar';
 import { TopBar } from '@/ui/TopBar';
+import { Toolbar } from '@/ui/Toolbar';
+import { ShortcutsPanel } from '@/ui/ShortcutsPanel';
 import { CanvasView } from '@/canvas/CanvasView';
 
 function BoardPage() {
@@ -15,7 +17,13 @@ function BoardPage() {
   }, [boardId, boardExists, openBoard]);
 
   if (!boardId || !boardExists) return <HomeRedirect />;
-  return <CanvasView boardId={boardId} />;
+  return (
+    <>
+      <CanvasView boardId={boardId} />
+      <Toolbar boardId={boardId} />
+      <ShortcutsPanel />
+    </>
+  );
 }
 
 function HomeRedirect() {
