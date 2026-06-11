@@ -6,6 +6,7 @@ import { TopBar } from '@/ui/TopBar';
 import { Toolbar } from '@/ui/Toolbar';
 import { ShortcutsPanel } from '@/ui/ShortcutsPanel';
 import { CommandPalette } from '@/ui/CommandPalette';
+import { QuickCapture } from '@/ui/QuickCapture';
 import { useUiStore } from '@/ui/uiStore';
 import { CanvasView } from '@/canvas/CanvasView';
 
@@ -23,6 +24,7 @@ function BoardPage() {
     <>
       <CanvasView boardId={boardId} />
       <Toolbar boardId={boardId} />
+      <QuickCapture boardId={boardId} />
       <ShortcutsPanel />
     </>
   );

@@ -11,6 +11,7 @@ import {
   reorderBoardCmd,
 } from '@/store/boardCommands';
 import { Logo } from './Logo';
+import { useUiStore } from './uiStore';
 
 function childrenOf(boards: Record<string, Board>, parentId: string | null) {
   return Object.values(boards)
@@ -110,6 +111,7 @@ function BoardNode({
               draggable={false}
               onClick={(e) => {
                 if (drag?.started) e.preventDefault();
+                else useUiStore.getState().setSidebarOpen(false);
               }}
               className={({ isActive }) =>
                 `block select-none truncate rounded-md px-2 py-1.5 pr-7 text-sm ${
@@ -164,6 +166,30 @@ function DropHint({ depth, pos }: { depth: number; pos: 'top' | 'bottom' }) {
 }
 
 export function Sidebar() {
+  const open = useUiStore((s) => s.sidebarOpen);
+  const setOpen = useUiStore((s) => s.setSidebarOpen);
+  return (
+    <>
+      <aside className="hidden w-60 shrink-0 border-r border-panel-border bg-panel sm:block">
+        <SidebarContent />
+      </aside>
+      {open && (
+        <div className="fixed inset-0 z-50 sm:hidden">
+          <div
+            className="absolute inset-0 bg-ink/30"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <aside className="absolute left-0 top-0 h-full w-64 border-r border-panel-border bg-panel shadow-card-drag">
+            <SidebarContent />
+          </aside>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SidebarContent() {
   const boards = useStore((s) => s.boards);
   const execute = useStore((s) => s.execute);
   const navigate = useNavigate();
@@ -281,7 +307,7 @@ export function Sidebar() {
   }, [drag !== null, execute]);
 
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-r border-panel-border bg-panel sm:flex">
+    <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 px-4 py-4">
         <Logo className="h-6 w-6" />
         <span className="text-[15px] font-semibold tracking-tight">Mosaic</span>
@@ -321,6 +347,6 @@ export function Sidebar() {
           {boards[drag.boardId]?.title || 'Untitled board'}
         </div>
       )}
-    </aside>
+    </div>
   );
 }

@@ -41,7 +41,7 @@ export function ZoomControls({
 
   return (
     <div
-      className="absolute bottom-4 right-4 z-40 flex items-center gap-1 rounded-lg border border-card-border bg-card p-1 shadow-card"
+      className="absolute bottom-16 right-3 z-40 flex items-center gap-1 rounded-lg border border-card-border bg-card p-1 shadow-card sm:bottom-4 sm:right-4"
       onPointerDown={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >

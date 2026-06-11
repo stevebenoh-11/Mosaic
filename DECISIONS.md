@@ -114,3 +114,21 @@ Unspecified details, resolved with the simplest option consistent with the data 
 - **Backup restore REPLACES** the workspace (after an explicit confirm) and
   marks everything restored as dirty in the outbox so a later sync push is
   complete. Tombstones are cleared on restore.
+
+## M5
+
+- **Touch model**: touch on empty canvas always pans (marquee is mouse-only;
+  multi-select on touch via tap + future lasso is out of v1 scope). Touch on a
+  card selects immediately; dragging unlocks after a 300 ms long-press
+  (vibration cue) — early movement converts the gesture to a canvas pan.
+- **Virtualization** filters at render: cards intersecting viewport +300 px
+  margin, plus anything selected/editing. Lines/comments always render (cheap
+  SVG/small pins). Stress: 1,500-element board mounts <500 DOM cards.
+- **Quick capture** targets the current board or a pinned "Inbox" root board
+  (created on first use, sortIndex -1, id cached in meta). Captures to other
+  boards stack below that board's existing content.
+- **Image cards clamp to a minimum 80×60 display size** so tiny images stay
+  grabbable.
+- **e2e** runs against a production build (`vite preview`) so the service
+  worker and offline cold-start are exercised for real; each test is
+  self-contained because Playwright contexts have isolated IndexedDB.

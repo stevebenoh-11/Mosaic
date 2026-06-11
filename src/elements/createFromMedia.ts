@@ -33,8 +33,9 @@ export async function createImageElement(
   const asset = await saveAsset(blob, name);
   const natW = asset.width ?? 200;
   const natH = asset.height ?? 150;
-  const w = Math.min(MAX_IMG_W, natW || MAX_IMG_W);
-  const h = natW > 0 ? Math.round((w / natW) * natH) : 150;
+  // Clamp display size: tiny images still get a usable card.
+  const w = Math.max(80, Math.min(MAX_IMG_W, natW || MAX_IMG_W));
+  const h = Math.max(60, natW > 0 ? Math.round((w / natW) * natH) : 150);
   const el = buildElement(boardId, 'image', world.x, world.y, maxZOf(boardId) + 1, {
     w,
     h,

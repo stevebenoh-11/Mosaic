@@ -12,9 +12,62 @@ registerSW({ immediate: true });
 declare global {
   interface Window {
     __mosaicStore: typeof useStore;
+    __mosaicSeedStress: (count?: number) => Promise<string>;
   }
 }
 window.__mosaicStore = useStore;
+
+// Dev/e2e helper: seed a large stress board and return its id.
+window.__mosaicSeedStress = async (count = 1500) => {
+  const { db } = await import('./db/schema');
+  const { newId } = await import('./db/ids');
+  const now = Date.now();
+  const boardId = newId();
+  await db.boards.add({
+    id: boardId,
+    title: `Stress ${count}`,
+    parentBoardId: null,
+    sortIndex: 999,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const cols = Math.ceil(Math.sqrt(count * 1.5));
+  const elements = Array.from({ length: count }, (_, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const swatch = i % 7 === 0;
+    return {
+      id: newId(),
+      boardId,
+      type: swatch ? ('swatch' as const) : ('note' as const),
+      x: col * 260,
+      y: row * 160,
+      w: swatch ? 140 : 200,
+      h: swatch ? 100 : 90,
+      zIndex: i + 1,
+      parentColumnId: null,
+      sortIndex: 0,
+      content: swatch
+        ? { hex: '#6C5CE7', label: `S${i}` }
+        : {
+            doc: {
+              type: 'doc' as const,
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: `Stress card #${i}` }],
+                },
+              ],
+            },
+          },
+      style: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+  await db.elements.bulkAdd(elements);
+  return boardId;
+};
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

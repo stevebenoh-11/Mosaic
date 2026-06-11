@@ -106,7 +106,7 @@ await page.keyboard.press('Escape');
 const png = await sharp({
   create: { width: 200, height: 120, channels: 3, background: { r: 80, g: 120, b: 220 } },
 }).png().toBuffer();
-await page.setInputFiles('input[type="file"][accept="image/*"]', {
+await page.setInputFiles('input[aria-label="Upload image"]', {
   name: 'pic.png', mimeType: 'image/png', buffer: png,
 });
 await page.waitForTimeout(400);

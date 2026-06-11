@@ -4,6 +4,9 @@ import type { Element, ElementType } from '@/db/types';
 interface UiState {
   paletteOpen: boolean;
   setPaletteOpen(open: boolean): void;
+  /** Mobile drawer state for the board sidebar. */
+  sidebarOpen: boolean;
+  setSidebarOpen(open: boolean): void;
   /** Internal clipboard for cut/copy/paste of elements (cross-board). */
   clipboard: Element[] | null;
   setClipboard(els: Element[] | null): void;
@@ -34,6 +37,8 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   paletteOpen: false,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  sidebarOpen: false,
+  setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   clipboard: null,
   setClipboard: (clipboard) => set({ clipboard }),
   flashElementId: null,

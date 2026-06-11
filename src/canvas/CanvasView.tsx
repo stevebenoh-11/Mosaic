@@ -77,12 +77,16 @@ type Interaction =
       ids: string[];
       snapshots: Map<string, Element>;
       startWorld: Point;
+      startClient: Point;
       moved: boolean;
       alt: boolean;
       duplicated: boolean;
       coalesceKey?: string;
       soloCandidate: string | null;
       toggleCandidate: string | null;
+      /** Touch: drag only unlocks after a long-press; early move = pan. */
+      touchPending: boolean;
+      longPressTimer: number | null;
     }
   | {
       kind: 'resize';
@@ -157,6 +161,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
   const pendingMoveRef = useRef<Point | null>(null);
 
   const [spaceDown, setSpaceDown] = useState(false);
+  const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
   const [panning, setPanning] = useState(false);
   const [marqueeRect, setMarqueeRect] = useState<Rect | null>(null);
   const [guides, setGuides] = useState<SnapGuide[]>([]);
@@ -212,6 +217,18 @@ export function CanvasView({ boardId }: { boardId: string }) {
       screenToWorld(toLocal(client), useStore.getState().viewport),
     [toLocal],
   );
+
+  // ----- container size (for virtualization + fit) -----
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => {
+      setContainerSize({ w: node.clientWidth, h: node.clientHeight });
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   // ----- wheel: zoom (ctrl/cmd) or pan -----
 
@@ -567,17 +584,31 @@ export function CanvasView({ boardId }: { boardId: string }) {
         const el = state.elements[id];
         if (el && el.type !== 'line') snapshots.set(id, structuredClone(el));
       }
-      interactionRef.current = {
+      const isTouch = e.pointerType === 'touch';
+      const interaction: Extract<Interaction, { kind: 'drag' }> = {
         kind: 'drag',
         ids,
         snapshots,
         startWorld: toWorld({ x: e.clientX, y: e.clientY }),
+        startClient: { x: e.clientX, y: e.clientY },
         moved: false,
         alt: e.altKey,
         duplicated: false,
         soloCandidate,
         toggleCandidate,
+        touchPending: isTouch,
+        longPressTimer: null,
       };
+      if (isTouch) {
+        interaction.longPressTimer = window.setTimeout(() => {
+          const cur = interactionRef.current;
+          if (cur.kind === 'drag' && cur.touchPending) {
+            cur.touchPending = false;
+            navigator.vibrate?.(10);
+          }
+        }, 300);
+      }
+      interactionRef.current = interaction;
     },
     [setSelection, toWorld],
   );
@@ -658,6 +689,19 @@ export function CanvasView({ boardId }: { boardId: string }) {
       }
 
       if (e.button === 0) {
+        // One-finger pan on empty canvas for touch (marquee is mouse-only).
+        if (e.pointerType === 'touch' && !useUiStore.getState().drawMode.active) {
+          interactionRef.current = {
+            kind: 'pan',
+            start: { x: e.clientX, y: e.clientY },
+            startViewport: useStore.getState().viewport,
+          };
+          setPanning(true);
+          const st = useStore.getState();
+          if (st.editingElementId) setEditing(null);
+          if (st.selection.length > 0) setSelection([]);
+          return;
+        }
         const draw = useUiStore.getState().drawMode;
         if (draw.active) {
           const world = toWorld({ x: e.clientX, y: e.clientY });
@@ -791,6 +835,26 @@ export function CanvasView({ boardId }: { boardId: string }) {
       }
 
       if (interaction.kind === 'drag') {
+        if (interaction.touchPending) {
+          // Long-press hasn't fired yet: early movement means the user is
+          // panning the canvas with one finger, not moving the card.
+          const distPx = Math.hypot(
+            client.x - interaction.startClient.x,
+            client.y - interaction.startClient.y,
+          );
+          if (distPx > 10) {
+            if (interaction.longPressTimer !== null) {
+              clearTimeout(interaction.longPressTimer);
+            }
+            interactionRef.current = {
+              kind: 'pan',
+              start: interaction.startClient,
+              startViewport: state.viewport,
+            };
+            setPanning(true);
+          }
+          return;
+        }
         const world = screenToWorld(toLocal(client), state.viewport);
         const rawDx = world.x - interaction.startWorld.x;
         const rawDy = world.y - interaction.startWorld.y;
@@ -1061,6 +1125,9 @@ export function CanvasView({ boardId }: { boardId: string }) {
       }
 
       if (interaction.kind === 'drag') {
+        if (interaction.longPressTimer !== null) {
+          clearTimeout(interaction.longPressTimer);
+        }
         const state = useStore.getState();
         const drop = useUiStore.getState().columnDropTarget;
         useUiStore.getState().setColumnDropTarget(null);
@@ -1308,6 +1375,25 @@ export function CanvasView({ boardId }: { boardId: string }) {
 
   // ----- render -----
 
+  // Viewport virtualization: only mount cards intersecting the visible world
+  // rect (+ margin). Selected/editing cards always render.
+  const VIRTUAL_MARGIN = 300;
+  const renderedCards = useMemo(() => {
+    if (containerSize.w === 0) return cardElements;
+    const view: Rect = {
+      x: -viewport.x / viewport.scale - VIRTUAL_MARGIN,
+      y: -viewport.y / viewport.scale - VIRTUAL_MARGIN,
+      w: containerSize.w / viewport.scale + VIRTUAL_MARGIN * 2,
+      h: containerSize.h / viewport.scale + VIRTUAL_MARGIN * 2,
+    };
+    return cardElements.filter(
+      (el) =>
+        rectsIntersect(view, elementRect(el)) ||
+        selection.includes(el.id) ||
+        el.id === editingElementId,
+    );
+  }, [cardElements, containerSize, viewport, selection, editingElementId]);
+
   const spacing = GRID_SPACING * viewport.scale;
   const singleSelected =
     selectedElements.length === 1 ? selectedElements[0] : undefined;
@@ -1390,7 +1476,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
             temp={tempLine}
           />
 
-          {cardElements.map((el) => (
+          {renderedCards.map((el) => (
             <ElementView
               key={el.id}
               element={el}
@@ -1657,6 +1743,10 @@ function centerOf(el: Element | undefined): { x: number; y: number } | null {
   return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
 }
 
+const COARSE_POINTER =
+  typeof window !== 'undefined' &&
+  window.matchMedia?.('(pointer: coarse)').matches;
+
 function ResizeHandles({
   element,
   scale,
@@ -1668,7 +1758,7 @@ function ResizeHandles({
   handles: Handle[];
   onHandleDown: (e: ReactPointerEvent, element: Element, handle: Handle) => void;
 }) {
-  const size = 8 / scale;
+  const size = (COARSE_POINTER ? 16 : 8) / scale;
   const half = size / 2;
   const pos: Record<Handle, { left: number; top: number; cursor: string }> = {
     nw: { left: -half, top: -half, cursor: 'nwse-resize' },

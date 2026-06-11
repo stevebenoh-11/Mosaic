@@ -200,7 +200,7 @@ export function Toolbar({ boardId }: { boardId: string }) {
   return (
     <>
       <div
-        className="absolute left-3 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-0.5 rounded-xl border border-card-border bg-card p-1.5 shadow-card"
+        className="absolute inset-x-2 bottom-2 z-40 flex flex-row justify-start gap-0.5 overflow-x-auto rounded-xl border border-card-border bg-card p-1.5 shadow-card sm:inset-x-auto sm:bottom-auto sm:left-3 sm:top-1/2 sm:-translate-y-1/2 sm:flex-col sm:overflow-visible"
         role="toolbar"
         aria-label="Add elements"
       >

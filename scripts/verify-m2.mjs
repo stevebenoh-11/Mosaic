@@ -130,7 +130,7 @@ ok('column badge back to 1', await page.locator(`[data-column-id="${colId}"]`).g
 const png = await sharp({
   create: { width: 320, height: 200, channels: 3, background: { r: 200, g: 80, b: 60 } },
 }).png().toBuffer();
-await page.setInputFiles('input[type="file"]', { name: 'photo.png', mimeType: 'image/png', buffer: png });
+await page.setInputFiles('input[aria-label="Upload image"]', { name: 'photo.png', mimeType: 'image/png', buffer: png });
 await page.waitForTimeout(500);
 const images = await byType('image');
 ok('image element created from file', images.length === 1 && images[0].content.assetId.length > 10);
