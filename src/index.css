@@ -1,0 +1,44 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-canvas: #f5f4f0;
+  --color-grid-dot: #d9d7cf;
+  --color-accent: #6c5ce7;
+  --color-accent-soft: #e7e3fb;
+  --color-card: #ffffff;
+  --color-card-border: #e6e4dd;
+  --color-ink: #2d2a26;
+  --color-ink-soft: #8a867e;
+  --color-panel: #fbfaf7;
+  --color-panel-border: #ebe9e2;
+
+  --shadow-card: 0 1px 3px rgb(45 42 38 / 0.08), 0 1px 2px rgb(45 42 38 / 0.04);
+  --shadow-card-drag:
+    0 8px 24px rgb(45 42 38 / 0.16), 0 2px 6px rgb(45 42 38 / 0.08);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  @apply bg-canvas text-ink antialiased;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+}
+
+/* Focus ring consistent with the accent color */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}

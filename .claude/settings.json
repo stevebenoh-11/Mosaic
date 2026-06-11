@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "PowerShell(git init 2>&1)",
+      "PowerShell(npm install)",
+      "PowerShell(npm run icons)",
+      "PowerShell(npx tsc -b 2>&1)"
+    ]
+  }
+}
