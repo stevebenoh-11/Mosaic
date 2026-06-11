@@ -49,7 +49,10 @@ import {
 } from './coords';
 import { topElementAt } from './hitTest';
 import { computeSnap, type SnapGuide } from './snapping';
+import { distanceToPath, simplifyPoints, strokeBounds } from './drawing';
 import { ZoomControls } from './ZoomControls';
+import { DrawBar } from '@/ui/DrawBar';
+import type { DrawingContent } from '@/db/types';
 
 const DRAG_THRESHOLD_PX = 4;
 const SNAP_THRESHOLD_PX = 8;
@@ -89,6 +92,8 @@ type Interaction =
       startWorld: Point;
     }
   | { kind: 'line-draw'; fromId: string; fromSide: Side; moved: boolean }
+  | { kind: 'draw'; points: number[] }
+  | { kind: 'erase'; gesture: string }
   | { kind: 'pinch' };
 
 /** Expand a deletion set with lines/comments that reference the victims. */
@@ -156,6 +161,12 @@ export function CanvasView({ boardId }: { boardId: string }) {
   const [marqueeRect, setMarqueeRect] = useState<Rect | null>(null);
   const [guides, setGuides] = useState<SnapGuide[]>([]);
   const [tempLine, setTempLine] = useState<{ d: string } | null>(null);
+  const [tempStroke, setTempStroke] = useState<{
+    points: number[];
+    color: string;
+    width: number;
+  } | null>(null);
+  const drawActive = useUiStore((s) => s.drawMode.active);
   const [openCommentId, setOpenCommentId] = useState<string | null>(null);
   const [dndActiveId, setDndActiveId] = useState<string | null>(null);
 
@@ -309,6 +320,15 @@ export function CanvasView({ boardId }: { boardId: string }) {
 
       if (e.key === 'Escape') {
         const interaction = interactionRef.current;
+        if (interaction.kind === 'draw' || interaction.kind === 'erase') {
+          interactionRef.current = { kind: 'idle' };
+          setTempStroke(null);
+          return;
+        }
+        if (useUiStore.getState().drawMode.active) {
+          useUiStore.getState().setDrawMode({ active: false, eraser: false, activeDrawingId: null });
+          return;
+        }
         if (interaction.kind === 'drag' || interaction.kind === 'resize') {
           const patches: Record<string, Partial<Element>> = {};
           if (interaction.kind === 'drag') {
@@ -566,6 +586,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
     (e: ReactPointerEvent, element: Element) => {
       if (e.button === 1) return;
       if (spaceDown) return;
+      if (useUiStore.getState().drawMode.active) return; // canvas draws on top
       if (editingElementId === element.id) return;
       e.stopPropagation();
       // Capture on the element itself (not the container): pointer capture
@@ -637,6 +658,17 @@ export function CanvasView({ boardId }: { boardId: string }) {
       }
 
       if (e.button === 0) {
+        const draw = useUiStore.getState().drawMode;
+        if (draw.active) {
+          const world = toWorld({ x: e.clientX, y: e.clientY });
+          if (draw.eraser) {
+            interactionRef.current = { kind: 'erase', gesture: `erase:${e.pointerId}:${e.timeStamp}` };
+          } else {
+            interactionRef.current = { kind: 'draw', points: [world.x, world.y] };
+            setTempStroke({ points: [world.x, world.y], color: draw.color, width: draw.width });
+          }
+          return;
+        }
         const state = useStore.getState();
         interactionRef.current = {
           kind: 'marquee',
@@ -678,6 +710,44 @@ export function CanvasView({ boardId }: { boardId: string }) {
           x: interaction.startViewport.x + (client.x - interaction.start.x),
           y: interaction.startViewport.y + (client.y - interaction.start.y),
         });
+        return;
+      }
+
+      if (interaction.kind === 'draw') {
+        const world = screenToWorld(toLocal(client), state.viewport);
+        const pts = interaction.points;
+        const lastX = pts[pts.length - 2]!;
+        const lastY = pts[pts.length - 1]!;
+        if (Math.hypot(world.x - lastX, world.y - lastY) > 0.75 / state.viewport.scale) {
+          pts.push(world.x, world.y);
+          const draw = useUiStore.getState().drawMode;
+          setTempStroke({ points: [...pts], color: draw.color, width: draw.width });
+        }
+        return;
+      }
+
+      if (interaction.kind === 'erase') {
+        const world = screenToWorld(toLocal(client), state.viewport);
+        const radius = 10 / state.viewport.scale;
+        for (const el of Object.values(state.elements)) {
+          if (el.boardId !== boardId || el.type !== 'drawing') continue;
+          const c = el.content as DrawingContent;
+          const lx = world.x - el.x;
+          const ly = world.y - el.y;
+          const survivors = c.paths.filter(
+            (p) => distanceToPath(lx, ly, p.points) > radius + p.width / 2,
+          );
+          if (survivors.length === c.paths.length) continue;
+          const after =
+            survivors.length === 0
+              ? null
+              : { ...el, content: { paths: survivors } };
+          execute({
+            label: 'Erase',
+            coalesceKey: interaction.gesture,
+            changes: [{ entity: 'element', id: el.id, before: el, after }],
+          });
+        }
         return;
       }
 
@@ -861,6 +931,93 @@ export function CanvasView({ boardId }: { boardId: string }) {
       setMarqueeRect(null);
       setGuides([]);
       setTempLine(null);
+      setTempStroke(null);
+
+      if (interaction.kind === 'erase') {
+        useStore.getState().breakCoalescing();
+        return;
+      }
+
+      if (interaction.kind === 'draw') {
+        const state = useStore.getState();
+        const draw = useUiStore.getState().drawMode;
+        const simplified = simplifyPoints(interaction.points, 0.8);
+        if (simplified.length < 4) return;
+        const PADDING = 8;
+        const sb = strokeBounds(simplified);
+        const activeId = draw.activeDrawingId;
+        const existing = activeId ? state.elements[activeId] : undefined;
+
+        if (existing && existing.boardId === boardId) {
+          // Extend the session's drawing: union bounds, shift local coords.
+          const nx = Math.min(existing.x, sb.x - PADDING);
+          const ny = Math.min(existing.y, sb.y - PADDING);
+          const nr = Math.max(existing.x + existing.w, sb.x + sb.w + PADDING);
+          const nb = Math.max(existing.y + existing.h, sb.y + sb.h + PADDING);
+          const shiftX = existing.x - nx;
+          const shiftY = existing.y - ny;
+          const c = existing.content as DrawingContent;
+          const paths = c.paths.map((p) => ({
+            ...p,
+            points:
+              shiftX || shiftY
+                ? p.points.map((v, i) => (i % 2 === 0 ? v + shiftX : v + shiftY))
+                : p.points,
+          }));
+          paths.push({
+            points: simplified.map((v, i) => (i % 2 === 0 ? v - nx : v - ny)),
+            color: draw.color,
+            width: draw.width,
+          });
+          execute({
+            label: 'Draw',
+            changes: [
+              {
+                entity: 'element',
+                id: existing.id,
+                before: existing,
+                after: {
+                  ...existing,
+                  x: nx,
+                  y: ny,
+                  w: nr - nx,
+                  h: nb - ny,
+                  content: { paths },
+                },
+              },
+            ],
+          });
+        } else {
+          const el = buildElement(
+            boardId,
+            'drawing',
+            sb.x - PADDING,
+            sb.y - PADDING,
+            maxZ + 1,
+            {
+              w: sb.w + PADDING * 2,
+              h: sb.h + PADDING * 2,
+              content: {
+                paths: [
+                  {
+                    points: simplified.map((v, i) =>
+                      i % 2 === 0 ? v - (sb.x - PADDING) : v - (sb.y - PADDING),
+                    ),
+                    color: draw.color,
+                    width: draw.width,
+                  },
+                ],
+              },
+            },
+          );
+          execute({
+            label: 'Draw',
+            changes: [{ entity: 'element', id: el.id, before: null, after: el }],
+          });
+          useUiStore.getState().setDrawMode({ activeDrawingId: el.id });
+        }
+        return;
+      }
 
       if (interaction.kind === 'line-draw') {
         if (!interaction.moved) return;
@@ -1166,6 +1323,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
 
   const handlesFor = (el: Element): Handle[] => {
     if (el.type === 'image') return ['nw', 'ne', 'se', 'sw'];
+    if (el.type === 'drawing') return []; // drawings move but don't resize
     if (AUTO_HEIGHT.has(el.type)) return ['e', 'w'];
     return ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
   };
@@ -1190,7 +1348,13 @@ export function CanvasView({ boardId }: { boardId: string }) {
         ref={setContainerRefs}
         data-testid="canvas"
         className={`relative flex-1 touch-none overflow-hidden bg-canvas ${
-          panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : ''
+          panning
+            ? 'cursor-grabbing'
+            : spaceDown
+              ? 'cursor-grab'
+              : drawActive
+                ? 'cursor-crosshair'
+                : ''
         }`}
         style={{
           backgroundImage:
@@ -1208,6 +1372,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
       >
         {/* world layer */}
         <div
+          data-world
           className="absolute left-0 top-0 origin-top-left"
           style={{
             transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
@@ -1245,6 +1410,26 @@ export function CanvasView({ boardId }: { boardId: string }) {
               onOpen={setOpenCommentId}
             />
           ))}
+
+          {/* in-progress freehand stroke */}
+          {tempStroke && tempStroke.points.length >= 4 && (
+            <svg
+              className="pointer-events-none absolute left-0 top-0"
+              style={{ width: 1, height: 1, overflow: 'visible' }}
+            >
+              <polyline
+                points={Array.from(
+                  { length: tempStroke.points.length / 2 },
+                  (_, j) => `${tempStroke.points[j * 2]},${tempStroke.points[j * 2 + 1]}`,
+                ).join(' ')}
+                fill="none"
+                stroke={tempStroke.color}
+                strokeWidth={tempStroke.width}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
 
           {/* line anchors on the selected card */}
           {anchorSource && (
@@ -1321,6 +1506,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
           </div>
         )}
 
+        <DrawBar />
         <ZoomControls containerRef={containerRef} boardElements={cardElements} />
       </div>
 

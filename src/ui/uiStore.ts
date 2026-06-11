@@ -19,6 +19,16 @@ interface UiState {
   /** Live insertion target while dragging cards over a column. */
   columnDropTarget: { columnId: string; index: number } | null;
   setColumnDropTarget(t: { columnId: string; index: number } | null): void;
+  /** Freehand drawing mode. */
+  drawMode: {
+    active: boolean;
+    color: string;
+    width: number;
+    eraser: boolean;
+    /** Drawing element being extended this session. */
+    activeDrawingId: string | null;
+  };
+  setDrawMode(patch: Partial<UiState['drawMode']>): void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -36,6 +46,15 @@ export const useUiStore = create<UiState>((set) => ({
     set({ draggingTool, dragPoint: draggingTool ? (dragPoint ?? null) : null }),
   columnDropTarget: null,
   setColumnDropTarget: (columnDropTarget) => set({ columnDropTarget }),
+  drawMode: {
+    active: false,
+    color: '#2D2A26',
+    width: 3,
+    eraser: false,
+    activeDrawingId: null,
+  },
+  setDrawMode: (patch) =>
+    set((s) => ({ drawMode: { ...s.drawMode, ...patch } })),
 }));
 
 /** True when the event originates from a text-input context. */

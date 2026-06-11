@@ -38,7 +38,7 @@ const TOOLS: Tool[] = [
   { type: 'column', label: 'Column', icon: Columns2, enabled: true },
   { type: 'swatch', label: 'Swatch', icon: Palette, enabled: true },
   { type: 'line', label: 'Line', icon: Minus, enabled: true, hint: 'Tip: drag from a selected card’s edge dots' },
-  { type: 'drawing', label: 'Draw', icon: PenLine, enabled: false },
+  { type: 'drawing', label: 'Draw', icon: PenLine, enabled: true, hint: 'Draw freehand on the canvas' },
   { type: 'boardLink', label: 'Board', icon: Square, enabled: true },
   { type: 'comment', label: 'Comment', icon: MessageSquare, enabled: true },
 ];
@@ -211,11 +211,23 @@ export function Toolbar({ boardId }: { boardId: string }) {
             title={t.enabled ? (t.hint ?? t.label) : `${t.label} (coming soon)`}
             disabled={!t.enabled}
             onPointerDown={(e) => {
-              if (!t.enabled || e.button !== 0) return;
+              if (!t.enabled || e.button !== 0 || t.type === 'drawing') return;
               e.preventDefault();
               setDraggingTool(t.type, { x: e.clientX, y: e.clientY });
             }}
-            onClick={() => t.enabled && !dragPoint && createAtCenter(t.type)}
+            onClick={() => {
+              if (!t.enabled) return;
+              if (t.type === 'drawing') {
+                const ui = useUiStore.getState();
+                ui.setDrawMode({
+                  active: !ui.drawMode.active,
+                  eraser: false,
+                  activeDrawingId: null,
+                });
+                return;
+              }
+              if (!dragPoint) createAtCenter(t.type);
+            }}
             className="rounded-lg p-2 text-ink-soft enabled:hover:bg-panel-border/60 enabled:hover:text-ink disabled:opacity-30"
           >
             <t.icon className="h-4 w-4" />

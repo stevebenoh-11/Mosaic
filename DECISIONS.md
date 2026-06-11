@@ -100,3 +100,17 @@ Unspecified details, resolved with the simplest option consistent with the data 
   cap 8). Selecting an element result navigates, selects, centers and flashes.
 - **Flush-on-hide**: pending debounced writes are force-flushed on
   `visibilitychange: hidden` / `pagehide` / `beforeunload`.
+
+## M4
+
+- **Drawing sessions**: one `drawing` element per draw-mode session — the first
+  stroke creates it, later strokes union its bounds (shifting stored
+  element-local points). Each stroke is its own undo step; eraser removals
+  coalesce per gesture. Strokes are RDP-simplified (tolerance 0.8 world px).
+  Drawings drag but don't resize in v1; eraser removes whole strokes.
+- **PNG/PDF export** captures the live world DOM via html-to-image with the
+  transform overridden to content bounds at scale 1, pixelRatio 2; PDF embeds
+  that PNG at 96 dpi → pt. Selection is cleared before capture.
+- **Backup restore REPLACES** the workspace (after an explicit confirm) and
+  marks everything restored as dirty in the outbox so a later sync push is
+  complete. Tombstones are cleared on restore.

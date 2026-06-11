@@ -7,6 +7,7 @@ import { LinkCard } from './link/LinkCard';
 import { TodoCard } from './todo/TodoCard';
 import { ColumnCard } from './column/ColumnCard';
 import { BoardLinkCard } from './boardLink/BoardLinkCard';
+import { DrawingCard } from './drawing/DrawingCard';
 
 /** Per-type card body, shared by canvas cards and column children. */
 export function ElementBody({
@@ -33,6 +34,8 @@ export function ElementBody({
       return <ColumnCard element={element} />;
     case 'boardLink':
       return <BoardLinkCard element={element} />;
+    case 'drawing':
+      return <DrawingCard element={element} />;
     default:
       return (
         <div className="p-3 text-xs text-ink-soft">{element.type}</div>

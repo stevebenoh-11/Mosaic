@@ -9,7 +9,7 @@ import { ElementBody } from './ElementBody';
 export const AUTO_HEIGHT = new Set(['note', 'title', 'todo', 'column']);
 const EDITABLE = new Set(['note', 'title', 'swatch', 'column']);
 /** Types drawn without the white card chrome. */
-const CHROMELESS = new Set(['title', 'column', 'comment']);
+const CHROMELESS = new Set(['title', 'column', 'comment', 'drawing']);
 const CLIPPED = new Set(['image', 'link', 'swatch']);
 
 interface Props {

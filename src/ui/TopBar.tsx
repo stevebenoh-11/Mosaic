@@ -2,6 +2,7 @@ import { Check, Loader2 } from 'lucide-react';
 import { useStore } from '@/store';
 import { Breadcrumbs } from './Breadcrumbs';
 import { AccountMenu } from './AccountMenu';
+import { ExportMenu } from './ExportMenu';
 
 function SaveIndicator() {
   const saveState = useStore((s) => s.saveState);
@@ -29,6 +30,7 @@ export function TopBar() {
       <Breadcrumbs />
       <div className="flex-1" />
       <SaveIndicator />
+      <ExportMenu />
       <AccountMenu />
     </header>
   );
