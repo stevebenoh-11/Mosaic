@@ -74,3 +74,29 @@ Unspecified details, resolved with the simplest option consistent with the data 
   toolbar Line tool drops a free point-to-point arrow. Endpoint sides resolve
   dynamically (nearest side) unless pinned by the anchor used.
 - **Duplicating a column** copies the column card only, not its children.
+
+## M3
+
+- **Board tool** creates the child board *and* its boardLink card in one
+  command, so undo removes both. Board cards navigate on double-click — handled
+  on the ElementView wrapper because pointer capture retargets dblclick there.
+- **Deleting a board** loads its elements from Dexie (they're rarely in memory),
+  tombstones them with the board, and re-parents sub-boards to the deleted
+  board's parent — one undoable command. boardLink cards pointing at a missing
+  board render a "Missing board" card rather than breaking.
+- **Cut/copy/paste** uses an in-memory app clipboard (lost on reload — system
+  clipboard can't round-trip arbitrary card graphs). Internal clipboard takes
+  precedence over system paste on Ctrl+V; system text/image paste applies when
+  the app clipboard is empty. Clones remap ids for column membership, line
+  endpoints, and comment targets; lines whose endpoints fall outside the copied
+  set are skipped.
+- **Cross-board moves** keep coordinates; pinned comments follow; lines move
+  only when both endpoints move, otherwise they're deleted in the same command.
+- **Sidebar drag**: top/bottom 30% of a row = reorder before/after, middle =
+  nest inside; dropping onto your own descendant is refused (cycle guard).
+- **Search palette** indexes Dexie directly on open (boards + all element text),
+  so it spans unloaded boards; simple token-substring scoring, boards ranked
+  slightly above elements; empty query = recent boards (meta `recentBoards`,
+  cap 8). Selecting an element result navigates, selects, centers and flashes.
+- **Flush-on-hide**: pending debounced writes are force-flushed on
+  `visibilitychange: hidden` / `pagehide` / `beforeunload`.

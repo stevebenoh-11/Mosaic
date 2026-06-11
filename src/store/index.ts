@@ -38,6 +38,8 @@ interface AppState {
   redo(): void;
   /** End the current text-editing session so further edits are a new undo step. */
   breakCoalescing(): void;
+  /** Force-flush pending writes (used on tab hide/unload). */
+  flushNow(): Promise<void>;
   setSelection(ids: string[]): void;
   setEditing(id: string | null): void;
   setViewport(v: Viewport): void;
@@ -120,6 +122,10 @@ export const useStore = create<AppState>((set, get) => {
         editingElementId: null,
         viewport,
       });
+      // Track recent boards (most recent first, capped).
+      const recents = (await getMeta<string[]>('recentBoards')) ?? [];
+      const next = [boardId, ...recents.filter((id) => id !== boardId)].slice(0, 8);
+      await setMeta('recentBoards', next);
     },
 
     execute(cmd) {
@@ -149,6 +155,10 @@ export const useStore = create<AppState>((set, get) => {
 
     breakCoalescing() {
       history.breakCoalescing();
+    },
+
+    flushNow() {
+      return persister.flush();
     },
 
     setSelection(ids) {

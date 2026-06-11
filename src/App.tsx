@@ -5,6 +5,8 @@ import { Sidebar } from '@/ui/Sidebar';
 import { TopBar } from '@/ui/TopBar';
 import { Toolbar } from '@/ui/Toolbar';
 import { ShortcutsPanel } from '@/ui/ShortcutsPanel';
+import { CommandPalette } from '@/ui/CommandPalette';
+import { useUiStore } from '@/ui/uiStore';
 import { CanvasView } from '@/canvas/CanvasView';
 
 function BoardPage() {
@@ -51,6 +53,35 @@ export default function App() {
     void init();
   }, [init]);
 
+  // Best-effort flush of pending writes when the tab hides or unloads.
+  useEffect(() => {
+    const flush = () => void useStore.getState().flushNow();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, []);
+
+  // Global Ctrl/Cmd+K opens the search palette.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const ui = useUiStore.getState();
+        ui.setPaletteOpen(!ui.paletteOpen);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   if (!ready) {
     return (
       <div className="flex h-full items-center justify-center text-ink-soft">
@@ -71,6 +102,7 @@ export default function App() {
             <Route path="*" element={<HomeRedirect />} />
           </Routes>
         </main>
+        <CommandPalette />
       </div>
     </div>
   );

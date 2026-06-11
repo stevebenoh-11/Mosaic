@@ -35,6 +35,7 @@ import { LineLayer } from '@/elements/line/LineLayer';
 import { anchorPoint, type Side } from '@/elements/line/geometry';
 import { CommentPin } from '@/elements/comment/CommentPin';
 import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
+import { cloneElements, moveElementsToBoardCmd } from '@/store/boardCommands';
 import {
   boundingBox,
   clampScale,
@@ -382,6 +383,44 @@ export function CanvasView({ boardId }: { boardId: string }) {
           const { command, newIds } = duplicateElementsCmd(selected, 16);
           execute(command);
           setSelection(newIds);
+        }
+        return;
+      }
+      if (mod && (key === 'c' || key === 'x') && state.selection.length > 0) {
+        const selected = state.selection
+          .map((id) => state.elements[id])
+          .filter((el): el is Element => !!el);
+        const full = withDependents(state.elements, boardId, selected);
+        useUiStore.getState().setClipboard(full.map((el) => structuredClone(el)));
+        if (key === 'x') {
+          e.preventDefault();
+          execute(deleteElementsCmd(full));
+          setSelection([]);
+        }
+        return;
+      }
+      if (mod && key === 'v') {
+        const clip = useUiStore.getState().clipboard;
+        if (clip && clip.length > 0) {
+          e.preventDefault(); // suppress the system paste event
+          const z =
+            Math.max(
+              0,
+              ...Object.values(state.elements)
+                .filter((el) => el.boardId === boardId)
+                .map((el) => el.zIndex),
+            ) + 1;
+          const copies = cloneElements(clip, boardId, { x: 24, y: 24 }, z);
+          execute({
+            label: `Paste ${copies.length > 1 ? `${copies.length} elements` : 'element'}`,
+            changes: copies.map((c) => ({
+              entity: 'element' as const,
+              id: c.id,
+              before: null,
+              after: c,
+            })),
+          });
+          setSelection(copies.filter((c) => c.parentColumnId === null).map((c) => c.id));
         }
         return;
       }
@@ -869,6 +908,28 @@ export function CanvasView({ boardId }: { boardId: string }) {
         const drop = useUiStore.getState().columnDropTarget;
         useUiStore.getState().setColumnDropTarget(null);
 
+        // Dropped on a sidebar board row → move elements to that board.
+        if (interaction.moved) {
+          const navRow = (
+            document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+          )?.closest('[data-board-nav-id]');
+          const targetBoardId = navRow?.getAttribute('data-board-nav-id');
+          if (targetBoardId && targetBoardId !== boardId) {
+            // Restore original positions first so the move lands cleanly.
+            const patches: Record<string, Partial<Element>> = {};
+            for (const [id, snap] of interaction.snapshots) {
+              patches[id] = { x: snap.x, y: snap.y };
+            }
+            updateEphemeral(patches);
+            const originals = [...interaction.snapshots.values()];
+            execute(
+              moveElementsToBoardCmd(originals, state.elements, targetBoardId),
+            );
+            setSelection([]);
+            return;
+          }
+        }
+
         if (interaction.moved && drop) {
           // Drop into a column: insert at the indicated index.
           const children = columnChildren(state.elements, drop.columnId).filter(
@@ -952,6 +1013,30 @@ export function CanvasView({ boardId }: { boardId: string }) {
     },
     [boardId, execute, maxZ, setEditing, setSelection, toWorld],
   );
+
+  // ----- search-result flash: center + highlight the element -----
+
+  const flashElementId = useUiStore((s) => s.flashElementId);
+  useEffect(() => {
+    if (!flashElementId) return;
+    const el = useStore.getState().elements[flashElementId];
+    if (!el || el.boardId !== boardId) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      const scale = useStore.getState().viewport.scale;
+      setViewport({
+        scale,
+        x: rect.width / 2 - (el.x + el.w / 2) * scale,
+        y: rect.height / 2 - (el.y + el.h / 2) * scale,
+      });
+    }
+    setSelection([flashElementId]);
+    const timer = setTimeout(
+      () => useUiStore.getState().setFlashElementId(null),
+      1600,
+    );
+    return () => clearTimeout(timer);
+  }, [flashElementId, boardId, elements[flashElementId ?? ''] !== undefined, setSelection, setViewport]);
 
   // ----- dnd-kit: sorting inside columns + drag out to canvas -----
 
@@ -1146,6 +1231,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
               element={el}
               selected={selection.includes(el.id)}
               editing={editingElementId === el.id}
+              flashing={flashElementId === el.id}
               onPointerDown={onElementPointerDown}
             />
           ))}

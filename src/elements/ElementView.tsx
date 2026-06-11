@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
-import type { Element } from '@/db/types';
+import type { BoardLinkContent, Element } from '@/db/types';
 import { ElementBody } from './ElementBody';
 
 /** Types whose height follows their content (measured, not dragged). */
@@ -15,6 +16,7 @@ interface Props {
   element: Element;
   selected: boolean;
   editing: boolean;
+  flashing?: boolean;
   onPointerDown: (e: ReactPointerEvent, element: Element) => void;
 }
 
@@ -22,10 +24,12 @@ export const ElementView = memo(function ElementView({
   element,
   selected,
   editing,
+  flashing,
   onPointerDown,
 }: Props) {
   const setEditing = useStore((s) => s.setEditing);
   const updateEphemeral = useStore((s) => s.updateEphemeral);
+  const navigate = useNavigate();
   const ref = useRef<HTMLDivElement>(null);
 
   const autoHeight = AUTO_HEIGHT.has(element.type);
@@ -56,6 +60,12 @@ export const ElementView = memo(function ElementView({
       onDoubleClick={(e) => {
         e.stopPropagation();
         if (EDITABLE.has(element.type)) setEditing(element.id);
+        // Pointer capture retargets dblclick to this wrapper, so board
+        // navigation must live here rather than on the card body.
+        if (element.type === 'boardLink') {
+          const target = (element.content as BoardLinkContent).boardId;
+          if (useStore.getState().boards[target]) navigate(`/b/${target}`);
+        }
       }}
       className={[
         'absolute',
@@ -69,6 +79,7 @@ export const ElementView = memo(function ElementView({
             ? 'border-card-border'
             : '',
         editing ? 'cursor-text' : 'cursor-default',
+        flashing ? 'animate-pulse ring-4 ring-accent' : '',
       ].join(' ')}
       style={{
         left: element.x,

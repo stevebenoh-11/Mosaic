@@ -1,7 +1,15 @@
 import { create } from 'zustand';
-import type { ElementType } from '@/db/types';
+import type { Element, ElementType } from '@/db/types';
 
 interface UiState {
+  paletteOpen: boolean;
+  setPaletteOpen(open: boolean): void;
+  /** Internal clipboard for cut/copy/paste of elements (cross-board). */
+  clipboard: Element[] | null;
+  setClipboard(els: Element[] | null): void;
+  /** Element to flash-highlight + center after search navigation. */
+  flashElementId: string | null;
+  setFlashElementId(id: string | null): void;
   shortcutsOpen: boolean;
   setShortcutsOpen(open: boolean): void;
   /** Tool being dragged from the toolbar (ghost preview follows pointer). */
@@ -14,6 +22,12 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set) => ({
+  paletteOpen: false,
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
+  clipboard: null,
+  setClipboard: (clipboard) => set({ clipboard }),
+  flashElementId: null,
+  setFlashElementId: (flashElementId) => set({ flashElementId }),
   shortcutsOpen: false,
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   draggingTool: null,

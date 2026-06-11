@@ -16,6 +16,7 @@ import { useStore } from '@/store';
 import { useUiStore } from './uiStore';
 import type { Element, ElementType } from '@/db/types';
 import { buildElement } from '@/store/elementCommands';
+import { newId as newBoardId } from '@/db/ids';
 import { screenToWorld } from '@/canvas/coords';
 import { topElementAt } from '@/canvas/hitTest';
 import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
@@ -38,7 +39,7 @@ const TOOLS: Tool[] = [
   { type: 'swatch', label: 'Swatch', icon: Palette, enabled: true },
   { type: 'line', label: 'Line', icon: Minus, enabled: true, hint: 'Tip: drag from a selected card’s edge dots' },
   { type: 'drawing', label: 'Draw', icon: PenLine, enabled: false },
-  { type: 'boardLink', label: 'Board', icon: Square, enabled: false },
+  { type: 'boardLink', label: 'Board', icon: Square, enabled: true },
   { type: 'comment', label: 'Comment', icon: MessageSquare, enabled: true },
 ];
 
@@ -117,6 +118,33 @@ export function Toolbar({ boardId }: { boardId: string }) {
       if (url && URL_RE.test(url.trim())) {
         createLinkElement(boardId, url.trim(), world);
       }
+      return;
+    }
+    if (type === 'boardLink') {
+      // One command: new child board + its card on this board.
+      const now = Date.now();
+      const siblingCount = Object.values(state.boards).filter(
+        (b) => b.parentBoardId === boardId,
+      ).length;
+      const board = {
+        id: newBoardId(),
+        title: 'Untitled board',
+        parentBoardId: boardId,
+        sortIndex: siblingCount,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const el = buildElement(boardId, 'boardLink', world.x, world.y, maxZ + 1, {
+        content: { boardId: board.id },
+      });
+      state.execute({
+        label: 'Create board',
+        changes: [
+          { entity: 'board', id: board.id, before: null, after: board },
+          { entity: 'element', id: el.id, before: null, after: el },
+        ],
+      });
+      state.setSelection([el.id]);
       return;
     }
 
