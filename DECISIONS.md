@@ -132,3 +132,35 @@ Unspecified details, resolved with the simplest option consistent with the data 
 - **e2e** runs against a production build (`vite preview`) so the service
   worker and offline cold-start are exercised for real; each test is
   self-contained because Playwright contexts have isolated IndexedDB.
+
+## M6
+
+- **Tie-breaking**: rows carry `modifiedBy` (deviceId) stamped by the persister;
+  tombstones carry `deletedBy` + `boardId`. LWW compares timestamps, then
+  "delete beats edit" on exact ties, then higher deviceId — fully deterministic
+  on both sides (`sync/merge.ts` is pure and unit-tested).
+- **Engine is store-agnostic**: it talks to Dexie + a `RemoteStore` interface
+  and reports via callbacks; the app glue (`sync/index.ts`) refreshes zustand
+  (skipping any element mid-edit) and flushes the persister before each cycle.
+  Tests run two engines against an in-memory FakeRemote with revision counters.
+- **Push** is read-merge-write per board file: if the remote `headRevisionId`
+  moved since last seen, merge first, then upload; outbox rows are cleared only
+  up to the sequence snapshot taken at cycle start. The brief Drive-level race
+  is accepted — element-level LWW self-heals on the next cycle.
+- **First connect** enqueues the entire local workspace; the normal
+  pull-then-push cycle yields an element-by-element merge with any existing
+  remote data. "Replace" is never offered.
+- **Board deletion** travels via `deleted: true` manifest entries; the stale
+  board file is left in Drive (harmless, cheap) rather than deleted.
+- **Moved elements**: merging a board file checks remote ids against the whole
+  local elements table, so a card moved to another board locally can't be
+  resurrected by a stale copy in its old board's file.
+- **Outbox→engine signal** is a window CustomEvent fired after each persister
+  flush (push debounce ~4s); pulls happen on focus, online, every 30s while
+  visible, and via Sync now.
+- **Menus close via capture-phase pointerdown** — canvas cards stopPropagation
+  on bubble, which silently kept dropdown menus open (found by the sync e2e).
+- **Mocked e2e**: `accounts.google.com/gsi/client` is fulfilled with a stub
+  token client and `www.googleapis.com/**` with an in-memory MiniDrive shared
+  across two browser contexts (= two devices), run against the production
+  build with a dummy client ID baked in.

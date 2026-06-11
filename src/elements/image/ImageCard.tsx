@@ -1,6 +1,9 @@
 import { memo, useEffect, useState } from 'react';
-import { ImageOff } from 'lucide-react';
+import { CloudUpload, ImageOff } from 'lucide-react';
+import { liveQuery } from 'dexie';
 import { getAssetUrl } from '@/db/assets';
+import { db } from '@/db/schema';
+import { useSyncStore } from '@/sync/status';
 import type { Element, ImageContent } from '@/db/types';
 
 export function useAssetUrl(assetId: string | undefined): string | null {
@@ -21,6 +24,24 @@ export function useAssetUrl(assetId: string | undefined): string | null {
   return url;
 }
 
+/** True while the asset exists locally but hasn't reached Drive yet. */
+function useUploadPending(assetId: string | undefined): boolean {
+  const connected = useSyncStore((s) => s.connected);
+  const [pending, setPending] = useState(false);
+  useEffect(() => {
+    if (!assetId || !connected) {
+      setPending(false);
+      return;
+    }
+    const sub = liveQuery(() => db.assets.get(assetId)).subscribe({
+      next: (asset) => setPending(!!asset && !asset.driveFileId),
+      error: () => setPending(false),
+    });
+    return () => sub.unsubscribe();
+  }, [assetId, connected]);
+  return pending;
+}
+
 export const ImageCard = memo(function ImageCard({
   element,
 }: {
@@ -28,9 +49,18 @@ export const ImageCard = memo(function ImageCard({
 }) {
   const c = element.content as ImageContent;
   const url = useAssetUrl(c.assetId || undefined);
+  const uploadPending = useUploadPending(c.assetId || undefined);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
+      {uploadPending && (
+        <span
+          title="Waiting to upload to Drive"
+          className="absolute bottom-1.5 right-1.5 z-10 rounded-full bg-ink/50 p-1 text-white"
+        >
+          <CloudUpload className="h-3 w-3" />
+        </span>
+      )}
       {url ? (
         <img
           src={url}

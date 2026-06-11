@@ -4,6 +4,7 @@ import { useUiStore } from './uiStore';
 import { Breadcrumbs } from './Breadcrumbs';
 import { AccountMenu } from './AccountMenu';
 import { ExportMenu } from './ExportMenu';
+import { SyncStatusPill } from './SyncStatusPill';
 
 function SaveIndicator() {
   const saveState = useStore((s) => s.saveState);
@@ -37,6 +38,7 @@ export function TopBar() {
         <Menu className="h-4 w-4" />
       </button>
       <Breadcrumbs />
+      <SyncStatusPill />
       <div className="flex-1" />
       <SaveIndicator />
       <ExportMenu />

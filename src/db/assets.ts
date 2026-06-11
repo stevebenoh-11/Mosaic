@@ -45,10 +45,23 @@ export async function saveAsset(blob: Blob, name: string): Promise<Asset> {
 // Object-URL cache so every card render doesn't re-create blob URLs.
 const urlCache = new Map<string, string>();
 
+/** Sync layer hook: fetch a missing asset from the remote (returns success). */
+let remoteAssetFetcher: ((assetId: string) => Promise<boolean>) | null = null;
+export function setRemoteAssetFetcher(
+  fn: ((assetId: string) => Promise<boolean>) | null,
+): void {
+  remoteAssetFetcher = fn;
+}
+
 export async function getAssetUrl(assetId: string): Promise<string | null> {
   const cached = urlCache.get(assetId);
   if (cached) return cached;
-  const asset = await db.assets.get(assetId);
+  let asset = await db.assets.get(assetId);
+  if (!asset && remoteAssetFetcher) {
+    // Lazy download: the board referenced an asset we don't have yet.
+    const fetched = await remoteAssetFetcher(assetId);
+    if (fetched) asset = await db.assets.get(assetId);
+  }
   if (!asset) return null;
   const url = URL.createObjectURL(asset.blob);
   urlCache.set(assetId, url);

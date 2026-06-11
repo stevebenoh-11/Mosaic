@@ -3,7 +3,7 @@
 A local-first visual thinking workspace — freeform boards of notes, images,
 links, to-dos and ideas on an infinite canvas. Installable as a PWA on desktop
 and mobile, fully usable offline, with optional cross-device sync through your
-own Google Drive (see `SETUP_GOOGLE.md`, lands with M6).
+own Google Drive (one-time setup: [SETUP_GOOGLE.md](SETUP_GOOGLE.md), ~5 min).
 
 ![Mosaic](public/favicon.svg)
 
@@ -21,6 +21,10 @@ own Google Drive (see `SETUP_GOOGLE.md`, lands with M6).
 - Mobile: sidebar drawer, bottom toolbar, one-finger pan, long-press drag,
   pinch zoom, quick-capture FAB (note / camera / photo library / link → current
   board or Inbox)
+- Google Drive sync (optional): connect once per device and boards, notes and
+  images stay in sync everywhere — offline edits queue and merge cleanly
+  (element-level last-write-wins with tombstones); data lives in a visible
+  `Mosaic` folder in your Drive under the least-privilege `drive.file` scope
 
 ## Develop
 
@@ -73,7 +77,9 @@ src/
   elements/  one folder per card type (note, title, image, link, todo, column,
              swatch, line, drawing, boardLink, comment)
   ui/        sidebar, breadcrumbs, toolbar, search palette, shortcuts panel,
-             quick capture, export menu
+             quick capture, export menu, sync status/account UI
+  sync/      googleAuth (GIS token client), driveClient (REST v3 over fetch),
+             engine (push/pull/merge), merge (pure LWW), status store
   export/    PNG / PDF / JSON / zip backup + restore
 ```
 

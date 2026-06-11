@@ -7,6 +7,8 @@ import { Toolbar } from '@/ui/Toolbar';
 import { ShortcutsPanel } from '@/ui/ShortcutsPanel';
 import { CommandPalette } from '@/ui/CommandPalette';
 import { QuickCapture } from '@/ui/QuickCapture';
+import { SyncOnboarding } from '@/ui/SyncOnboarding';
+import { initSync } from '@/sync';
 import { useUiStore } from '@/ui/uiStore';
 import { CanvasView } from '@/canvas/CanvasView';
 
@@ -25,6 +27,7 @@ function BoardPage() {
       <CanvasView boardId={boardId} />
       <Toolbar boardId={boardId} />
       <QuickCapture boardId={boardId} />
+      <SyncOnboarding />
       <ShortcutsPanel />
     </>
   );
@@ -52,7 +55,7 @@ export default function App() {
   const init = useStore((s) => s.init);
 
   useEffect(() => {
-    void init();
+    void init().then(() => initSync());
   }, [init]);
 
   // Best-effort flush of pending writes when the tab hides or unloads.

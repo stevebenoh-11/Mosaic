@@ -24,6 +24,8 @@ export interface Board {
   sortIndex: number;
   createdAt: number;
   updatedAt: number;
+  /** deviceId of the last writer — deterministic tie-break for sync LWW. */
+  modifiedBy?: string;
 }
 
 /** TipTap document JSON — opaque to the data layer. */
@@ -129,6 +131,8 @@ export interface Element {
   style: ElementStyle;
   createdAt: number;
   updatedAt: number;
+  /** deviceId of the last writer — deterministic tie-break for sync LWW. */
+  modifiedBy?: string;
 }
 
 export interface Asset {
@@ -149,6 +153,10 @@ export interface Tombstone {
   id: string; // id of the deleted entity
   entityType: EntityType;
   deletedAt: number;
+  /** Board the entity belonged to (elements; null/undefined for boards). */
+  boardId?: string | null;
+  /** deviceId that performed the deletion (sync tie-break). */
+  deletedBy?: string;
 }
 
 export interface OutboxEntry {

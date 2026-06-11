@@ -26,5 +26,10 @@ export default defineConfig({
     port: 4173,
     reuseExistingServer: true,
     timeout: 240_000,
+    env: {
+      // Baked into the e2e build so the sync UI is enabled; the Drive API
+      // itself is route-mocked in sync.spec.ts.
+      VITE_GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
+    },
   },
 });
