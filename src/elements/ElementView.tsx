@@ -2,19 +2,19 @@ import { memo, useEffect, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useStore } from '@/store';
 import type { Element } from '@/db/types';
-import { NoteCard } from './note/NoteCard';
-import { TitleCard } from './title/TitleCard';
-import { SwatchCard } from './swatch/SwatchCard';
+import { ElementBody } from './ElementBody';
 
 /** Types whose height follows their content (measured, not dragged). */
-const AUTO_HEIGHT = new Set(['note', 'title']);
-const EDITABLE = new Set(['note', 'title']);
+export const AUTO_HEIGHT = new Set(['note', 'title', 'todo', 'column']);
+const EDITABLE = new Set(['note', 'title', 'swatch', 'column']);
+/** Types drawn without the white card chrome. */
+const CHROMELESS = new Set(['title', 'column', 'comment']);
+const CLIPPED = new Set(['image', 'link', 'swatch']);
 
 interface Props {
   element: Element;
   selected: boolean;
   editing: boolean;
-  dimmed?: boolean;
   onPointerDown: (e: ReactPointerEvent, element: Element) => void;
 }
 
@@ -31,8 +31,7 @@ export const ElementView = memo(function ElementView({
   const autoHeight = AUTO_HEIGHT.has(element.type);
 
   // Keep stored h in sync with rendered height for auto-height cards so
-  // marquee hit-testing and snapping use real bounds (presentation-derived,
-  // no command needed).
+  // marquee hit-testing and snapping use real bounds.
   useEffect(() => {
     if (!autoHeight || !ref.current) return;
     const node = ref.current;
@@ -47,7 +46,7 @@ export const ElementView = memo(function ElementView({
     return () => observer.disconnect();
   }, [autoHeight, element.id, updateEphemeral]);
 
-  const isCard = element.type !== 'title';
+  const isCard = !CHROMELESS.has(element.type);
 
   return (
     <div
@@ -60,11 +59,12 @@ export const ElementView = memo(function ElementView({
       }}
       className={[
         'absolute',
-        isCard
-          ? 'rounded-md border bg-card shadow-card'
-          : '',
+        isCard ? 'rounded-md border bg-card shadow-card' : 'rounded-md',
+        CLIPPED.has(element.type) ? 'overflow-hidden' : '',
         selected
-          ? 'border-accent ring-2 ring-accent/60'
+          ? isCard
+            ? 'border-accent ring-2 ring-accent/60'
+            : 'ring-2 ring-accent/60'
           : isCard
             ? 'border-card-border'
             : '',
@@ -79,13 +79,7 @@ export const ElementView = memo(function ElementView({
         zIndex: element.zIndex,
       }}
     >
-      {element.type === 'note' && (
-        <NoteCard element={element} editing={editing} />
-      )}
-      {element.type === 'title' && (
-        <TitleCard element={element} editing={editing} />
-      )}
-      {element.type === 'swatch' && <SwatchCard element={element} />}
+      <ElementBody element={element} editing={editing} />
     </div>
   );
 });

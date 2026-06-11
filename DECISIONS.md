@@ -45,3 +45,32 @@ Unspecified details, resolved with the simplest option consistent with the data 
   Shift jumps to front/back. New elements always get maxZ+1.
 - **Click-to-create**: clicking a toolbar tool (without dragging) creates the
   element at the viewport center — discoverability beats strict drag-only.
+
+## M2
+
+- **Pointer capture on the element, not the canvas**: capturing on the container
+  retargets derived click/dblclick events to it, silently breaking
+  double-click-to-edit on cards. Element-level capture keeps drags smooth and
+  lets dblclick reach the card.
+- **Column children** keep their last canvas `x/y` while stacked (unused but
+  restored context), and `sortIndex` uses fractional insertion (midpoint between
+  neighbors) for canvas→column drops; dnd-kit reorders renumber 0..n.
+- **Two drag systems, one boundary**: canvas cards move via the custom pointer
+  machine (with live column insertion indicator on hover); cards *inside*
+  columns are dnd-kit sortables, and dropping one on the canvas droppable pops
+  it back out at the drag position. Collision priority: child card → column →
+  canvas.
+- **Deleting a column deletes its cards**; deleting any card cascade-deletes
+  lines connected to it and comments pinned to it — all in one undoable command.
+- **No favicon fetching**: public favicon endpoints are CORS-blocked for
+  programmatic reads; link cards show a generic globe icon. Page metadata is
+  still attempted directly (works for CORS-permissive sites, falls back to
+  domain + URL).
+- **Comments** may carry `targetElementId`/`offsetX/Y` in content so pins follow
+  the card they were dropped on. Pins are not draggable in v1; they are placed
+  at creation and deleted/resolved from the popover. Lines and comments are not
+  part of marquee selection.
+- **Line creation** drags from edge anchors shown on the selected card; the
+  toolbar Line tool drops a free point-to-point arrow. Endpoint sides resolve
+  dynamically (nearest side) unless pinned by the anchor used.
+- **Duplicating a column** copies the column card only, not its children.

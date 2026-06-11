@@ -1,0 +1,49 @@
+import type { Element } from '@/db/types';
+import { NoteCard } from './note/NoteCard';
+import { TitleCard } from './title/TitleCard';
+import { SwatchCard } from './swatch/SwatchCard';
+import { ImageCard } from './image/ImageCard';
+import { LinkCard } from './link/LinkCard';
+import { TodoCard } from './todo/TodoCard';
+import { ColumnCard } from './column/ColumnCard';
+
+/** Per-type card body, shared by canvas cards and column children. */
+export function ElementBody({
+  element,
+  editing,
+}: {
+  element: Element;
+  editing: boolean;
+}) {
+  switch (element.type) {
+    case 'note':
+      return <NoteCard element={element} editing={editing} />;
+    case 'title':
+      return <TitleCard element={element} editing={editing} />;
+    case 'swatch':
+      return <SwatchCard element={element} editing={editing} />;
+    case 'image':
+      return <ImageCard element={element} />;
+    case 'link':
+      return <LinkCard element={element} />;
+    case 'todo':
+      return <TodoCard element={element} />;
+    case 'column':
+      return <ColumnCard element={element} />;
+    default:
+      return (
+        <div className="p-3 text-xs text-ink-soft">{element.type}</div>
+      );
+  }
+}
+
+/** Types that may live inside a column. */
+export const COLUMNABLE = new Set([
+  'note',
+  'title',
+  'image',
+  'link',
+  'todo',
+  'swatch',
+  'boardLink',
+]);

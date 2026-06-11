@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CheckSquare,
   Columns2,
@@ -14,29 +14,32 @@ import {
 } from 'lucide-react';
 import { useStore } from '@/store';
 import { useUiStore } from './uiStore';
-import type { ElementType } from '@/db/types';
+import type { Element, ElementType } from '@/db/types';
 import { buildElement } from '@/store/elementCommands';
 import { screenToWorld } from '@/canvas/coords';
+import { topElementAt } from '@/canvas/hitTest';
+import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
 
 interface Tool {
   type: ElementType;
   label: string;
   icon: typeof StickyNote;
   enabled: boolean;
+  hint?: string;
 }
 
 const TOOLS: Tool[] = [
   { type: 'note', label: 'Note', icon: StickyNote, enabled: true },
   { type: 'title', label: 'Title', icon: Type, enabled: true },
-  { type: 'image', label: 'Image', icon: ImageIcon, enabled: false },
-  { type: 'link', label: 'Link', icon: Link2, enabled: false },
-  { type: 'todo', label: 'To-do', icon: CheckSquare, enabled: false },
-  { type: 'column', label: 'Column', icon: Columns2, enabled: false },
+  { type: 'image', label: 'Image', icon: ImageIcon, enabled: true },
+  { type: 'link', label: 'Link', icon: Link2, enabled: true },
+  { type: 'todo', label: 'To-do', icon: CheckSquare, enabled: true },
+  { type: 'column', label: 'Column', icon: Columns2, enabled: true },
   { type: 'swatch', label: 'Swatch', icon: Palette, enabled: true },
-  { type: 'line', label: 'Line', icon: Minus, enabled: false },
+  { type: 'line', label: 'Line', icon: Minus, enabled: true, hint: 'Tip: drag from a selected card’s edge dots' },
   { type: 'drawing', label: 'Draw', icon: PenLine, enabled: false },
   { type: 'boardLink', label: 'Board', icon: Square, enabled: false },
-  { type: 'comment', label: 'Comment', icon: MessageSquare, enabled: false },
+  { type: 'comment', label: 'Comment', icon: MessageSquare, enabled: true },
 ];
 
 /**
@@ -47,6 +50,8 @@ export function Toolbar({ boardId }: { boardId: string }) {
   const draggingTool = useUiStore((s) => s.draggingTool);
   const dragPoint = useUiStore((s) => s.dragPoint);
   const setDraggingTool = useUiStore((s) => s.setDraggingTool);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingImageWorld, setPendingImageWorld] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!draggingTool) return;
@@ -62,7 +67,7 @@ export function Toolbar({ boardId }: { boardId: string }) {
       setDraggingTool(null);
       if (!tool) return;
       // Released back over the toolbar → treat as a click (handled by onClick).
-      if (e.target instanceof HTMLElement && e.target.closest('[role="toolbar"]')) {
+      if (e.target instanceof Element && e.target.closest('[role="toolbar"]')) {
         return;
       }
       const canvas = document.querySelector('[data-testid="canvas"]');
@@ -101,13 +106,60 @@ export function Toolbar({ boardId }: { boardId: string }) {
         .filter((el) => el.boardId === boardId)
         .map((el) => el.zIndex),
     );
-    const el = buildElement(boardId, type, world.x, world.y, maxZ + 1);
+
+    if (type === 'image') {
+      setPendingImageWorld(world);
+      fileInputRef.current?.click();
+      return;
+    }
+    if (type === 'link') {
+      const url = window.prompt('Link URL', 'https://');
+      if (url && URL_RE.test(url.trim())) {
+        createLinkElement(boardId, url.trim(), world);
+      }
+      return;
+    }
+
+    let overrides: Partial<Element> = {};
+    if (type === 'comment') {
+      const target = topElementAt(state.elements, boardId, world);
+      overrides = {
+        content: {
+          doc: { type: 'doc', content: [{ type: 'paragraph' }] },
+          authorName: 'You',
+          resolved: false,
+          ...(target
+            ? {
+                targetElementId: target.id,
+                offsetX: world.x - target.x,
+                offsetY: world.y - target.y,
+              }
+            : {}),
+        } as Element['content'],
+      };
+    } else if (type === 'line') {
+      overrides = {
+        w: 0,
+        h: 0,
+        content: {
+          from: { point: { x: world.x - 80, y: world.y } },
+          to: { point: { x: world.x + 80, y: world.y } },
+          curve: false,
+          dashed: false,
+          arrowEnd: true,
+        },
+      };
+    }
+
+    const el = buildElement(boardId, type, world.x, world.y, maxZ + 1, overrides);
     state.execute({
       label: `Create ${type}`,
       changes: [{ entity: 'element', id: el.id, before: null, after: el }],
     });
     state.setSelection([el.id]);
-    if (type === 'note' || type === 'title') state.setEditing(el.id);
+    if (type === 'note' || type === 'title' || type === 'column') {
+      state.setEditing(el.id);
+    }
   }
 
   function createAtCenter(type: ElementType) {
@@ -128,7 +180,7 @@ export function Toolbar({ boardId }: { boardId: string }) {
           <button
             key={t.type}
             aria-label={`Add ${t.label}`}
-            title={t.enabled ? t.label : `${t.label} (coming soon)`}
+            title={t.enabled ? (t.hint ?? t.label) : `${t.label} (coming soon)`}
             disabled={!t.enabled}
             onPointerDown={(e) => {
               if (!t.enabled || e.button !== 0) return;
@@ -142,6 +194,28 @@ export function Toolbar({ boardId }: { boardId: string }) {
           </button>
         ))}
       </div>
+
+      {/* hidden file input for the Image tool */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        aria-label="Upload image"
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          const base = pendingImageWorld ?? { x: 200, y: 200 };
+          files.forEach((f, i) => {
+            void createImageElement(boardId, f, f.name, {
+              x: base.x + i * 24,
+              y: base.y + i * 24,
+            });
+          });
+          e.target.value = '';
+          setPendingImageWorld(null);
+        }}
+      />
 
       {/* drag ghost */}
       {draggingTool && dragPoint && (

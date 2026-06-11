@@ -8,6 +8,9 @@ interface UiState {
   draggingTool: ElementType | null;
   dragPoint: { x: number; y: number } | null;
   setDraggingTool(tool: ElementType | null, point?: { x: number; y: number }): void;
+  /** Live insertion target while dragging cards over a column. */
+  columnDropTarget: { columnId: string; index: number } | null;
+  setColumnDropTarget(t: { columnId: string; index: number } | null): void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -17,6 +20,8 @@ export const useUiStore = create<UiState>((set) => ({
   dragPoint: null,
   setDraggingTool: (draggingTool, dragPoint) =>
     set({ draggingTool, dragPoint: draggingTool ? (dragPoint ?? null) : null }),
+  columnDropTarget: null,
+  setColumnDropTarget: (columnDropTarget) => set({ columnDropTarget }),
 }));
 
 /** True when the event originates from a text-input context. */

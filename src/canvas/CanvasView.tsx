@@ -6,9 +6,21 @@ import {
   useState,
 } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  pointerWithin,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
 import { useStore } from '@/store';
 import { useUiStore, isTypingTarget } from '@/ui/uiStore';
-import type { Element } from '@/db/types';
+import type { Element, LineContent } from '@/db/types';
 import {
   buildElement,
   deleteElementsCmd,
@@ -16,17 +28,25 @@ import {
   updateElementsCmd,
   zOrderCmd,
 } from '@/store/elementCommands';
-import { ElementView } from '@/elements/ElementView';
+import { ElementView, AUTO_HEIGHT } from '@/elements/ElementView';
+import { ElementBody, COLUMNABLE } from '@/elements/ElementBody';
+import { columnChildren } from '@/elements/column/ColumnCard';
+import { LineLayer } from '@/elements/line/LineLayer';
+import { anchorPoint, type Side } from '@/elements/line/geometry';
+import { CommentPin } from '@/elements/comment/CommentPin';
+import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
 import {
   boundingBox,
   clampScale,
   elementRect,
   rectsIntersect,
   screenToWorld,
+  worldToScreen,
   zoomAt,
   type Point,
   type Rect,
 } from './coords';
+import { topElementAt } from './hitTest';
 import { computeSnap, type SnapGuide } from './snapping';
 import { ZoomControls } from './ZoomControls';
 
@@ -67,7 +87,46 @@ type Interaction =
       snapshot: Element;
       startWorld: Point;
     }
+  | { kind: 'line-draw'; fromId: string; fromSide: Side; moved: boolean }
   | { kind: 'pinch' };
+
+/** Expand a deletion set with lines/comments that reference the victims. */
+function withDependents(
+  elements: Record<string, Element>,
+  boardId: string,
+  targets: Element[],
+): Element[] {
+  const ids = new Set(targets.map((e) => e.id));
+  const all = [...targets];
+  // Column children go with their column.
+  for (const el of Object.values(elements)) {
+    if (el.boardId !== boardId || ids.has(el.id)) continue;
+    if (el.parentColumnId && ids.has(el.parentColumnId)) {
+      ids.add(el.id);
+      all.push(el);
+    }
+  }
+  for (const el of Object.values(elements)) {
+    if (el.boardId !== boardId || ids.has(el.id)) continue;
+    if (el.type === 'line') {
+      const c = el.content as LineContent;
+      const refs = [c.from, c.to].some(
+        (end) => 'elementId' in end && ids.has(end.elementId),
+      );
+      if (refs) {
+        ids.add(el.id);
+        all.push(el);
+      }
+    } else if (el.type === 'comment') {
+      const c = el.content as { targetElementId?: string };
+      if (c.targetElementId && ids.has(c.targetElementId)) {
+        ids.add(el.id);
+        all.push(el);
+      }
+    }
+  }
+  return all;
+}
 
 export function CanvasView({ boardId }: { boardId: string }) {
   const elements = useStore((s) => s.elements);
@@ -82,18 +141,22 @@ export function CanvasView({ boardId }: { boardId: string }) {
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const setShortcutsOpen = useUiStore((s) => s.setShortcutsOpen);
+  const setColumnDropTarget = useUiStore((s) => s.setColumnDropTarget);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<Interaction>({ kind: 'idle' });
   const pointersRef = useRef(new Map<number, Point>());
   const pinchBaseRef = useRef<{ dist: number; viewport: typeof viewport } | null>(null);
   const rafRef = useRef<number | null>(null);
-  const pendingMoveRef = useRef<{ x: number; y: number; client: Point } | null>(null);
+  const pendingMoveRef = useRef<Point | null>(null);
 
   const [spaceDown, setSpaceDown] = useState(false);
   const [panning, setPanning] = useState(false);
   const [marqueeRect, setMarqueeRect] = useState<Rect | null>(null);
   const [guides, setGuides] = useState<SnapGuide[]>([]);
+  const [tempLine, setTempLine] = useState<{ d: string } | null>(null);
+  const [openCommentId, setOpenCommentId] = useState<string | null>(null);
+  const [dndActiveId, setDndActiveId] = useState<string | null>(null);
 
   const boardElements = useMemo(
     () =>
@@ -101,6 +164,18 @@ export function CanvasView({ boardId }: { boardId: string }) {
         (e) => e.boardId === boardId && e.parentColumnId === null,
       ),
     [elements, boardId],
+  );
+  const cardElements = useMemo(
+    () => boardElements.filter((e) => e.type !== 'line' && e.type !== 'comment'),
+    [boardElements],
+  );
+  const lineElements = useMemo(
+    () => boardElements.filter((e) => e.type === 'line'),
+    [boardElements],
+  );
+  const commentElements = useMemo(
+    () => boardElements.filter((e) => e.type === 'comment'),
+    [boardElements],
   );
 
   const maxZ = useMemo(
@@ -121,7 +196,8 @@ export function CanvasView({ boardId }: { boardId: string }) {
   }, []);
 
   const toWorld = useCallback(
-    (client: Point): Point => screenToWorld(toLocal(client), useStore.getState().viewport),
+    (client: Point): Point =>
+      screenToWorld(toLocal(client), useStore.getState().viewport),
     [toLocal],
   );
 
@@ -145,6 +221,85 @@ export function CanvasView({ boardId }: { boardId: string }) {
     return () => node.removeEventListener('wheel', onWheel);
   }, [setViewport, toLocal]);
 
+  // ----- paste & OS file drop -----
+
+  useEffect(() => {
+    function centerWorld(): Point {
+      const rect = containerRef.current?.getBoundingClientRect();
+      const local = rect
+        ? { x: rect.width / 2 - 120, y: rect.height / 2 - 60 }
+        : { x: 300, y: 200 };
+      return screenToWorld(local, useStore.getState().viewport);
+    }
+    function onPaste(e: ClipboardEvent) {
+      if (isTypingTarget(e.target) || useStore.getState().editingElementId) return;
+      const files = [...(e.clipboardData?.files ?? [])];
+      const images = files.filter((f) => f.type.startsWith('image/'));
+      if (images.length > 0) {
+        e.preventDefault();
+        const base = centerWorld();
+        images.forEach((f, i) => {
+          void createImageElement(boardId, f, f.name || 'pasted-image', {
+            x: base.x + i * 24,
+            y: base.y + i * 24,
+          });
+        });
+        return;
+      }
+      const text = e.clipboardData?.getData('text/plain')?.trim();
+      if (!text) return;
+      e.preventDefault();
+      if (URL_RE.test(text)) {
+        createLinkElement(boardId, text, centerWorld());
+      } else {
+        const state = useStore.getState();
+        const doc = {
+          type: 'doc' as const,
+          content: text.split(/\n+/).map((line) => ({
+            type: 'paragraph',
+            content: line ? [{ type: 'text', text: line }] : undefined,
+          })),
+        };
+        const world = centerWorld();
+        const el = buildElement(boardId, 'note', world.x, world.y, maxZ + 1, {
+          content: { doc },
+        });
+        state.execute({
+          label: 'Paste note',
+          changes: [{ entity: 'element', id: el.id, before: null, after: el }],
+        });
+        state.setSelection([el.id]);
+      }
+    }
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [boardId, maxZ]);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const world = toWorld({ x: e.clientX, y: e.clientY });
+      const files = [...e.dataTransfer.files].filter((f) =>
+        f.type.startsWith('image/'),
+      );
+      if (files.length > 0) {
+        files.forEach((f, i) => {
+          void createImageElement(boardId, f, f.name, {
+            x: world.x + i * 24,
+            y: world.y + i * 24,
+          });
+        });
+        return;
+      }
+      const uri = e.dataTransfer.getData('text/uri-list') ||
+        e.dataTransfer.getData('text/plain');
+      if (uri && URL_RE.test(uri.trim())) {
+        createLinkElement(boardId, uri.trim(), world);
+      }
+    },
+    [boardId, toWorld],
+  );
+
   // ----- keyboard -----
 
   useEffect(() => {
@@ -154,7 +309,6 @@ export function CanvasView({ boardId }: { boardId: string }) {
       if (e.key === 'Escape') {
         const interaction = interactionRef.current;
         if (interaction.kind === 'drag' || interaction.kind === 'resize') {
-          // Restore original geometry, abort the gesture.
           const patches: Record<string, Partial<Element>> = {};
           if (interaction.kind === 'drag') {
             for (const [id, snap] of interaction.snapshots) {
@@ -167,6 +321,12 @@ export function CanvasView({ boardId }: { boardId: string }) {
           updateEphemeral(patches);
           interactionRef.current = { kind: 'idle' };
           setGuides([]);
+          setColumnDropTarget(null);
+          return;
+        }
+        if (interaction.kind === 'line-draw') {
+          interactionRef.current = { kind: 'idle' };
+          setTempLine(null);
           return;
         }
         if (interaction.kind === 'marquee') {
@@ -179,8 +339,12 @@ export function CanvasView({ boardId }: { boardId: string }) {
           setShortcutsOpen(false);
           return;
         }
+        if (openCommentId) {
+          setOpenCommentId(null);
+          return;
+        }
         if (state.editingElementId) {
-          setEditing(null); // keep selection
+          setEditing(null);
           return;
         }
         if (state.selection.length > 0) setSelection([]);
@@ -213,7 +377,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
         e.preventDefault();
         const selected = state.selection
           .map((id) => state.elements[id])
-          .filter((el): el is Element => !!el);
+          .filter((el): el is Element => !!el && el.type !== 'line');
         if (selected.length > 0) {
           const { command, newIds } = duplicateElementsCmd(selected, 16);
           execute(command);
@@ -226,7 +390,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
         const selected = state.selection
           .map((id) => state.elements[id])
           .filter((el): el is Element => !!el);
-        execute(deleteElementsCmd(selected));
+        execute(deleteElementsCmd(withDependents(state.elements, boardId, selected)));
         setSelection([]);
         return;
       }
@@ -252,7 +416,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
       }
       if (e.key === 'Enter' && state.selection.length === 1 && !state.editingElementId) {
         const el = state.elements[state.selection[0]!];
-        if (el && (el.type === 'note' || el.type === 'title')) {
+        if (el && ['note', 'title', 'swatch', 'column'].includes(el.type)) {
           e.preventDefault();
           setEditing(el.id);
         }
@@ -272,7 +436,51 @@ export function CanvasView({ boardId }: { boardId: string }) {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [boardId, execute, redo, setEditing, setSelection, setShortcutsOpen, undo, updateEphemeral]);
+  }, [boardId, execute, openCommentId, redo, setColumnDropTarget, setEditing, setSelection, setShortcutsOpen, undo, updateEphemeral]);
+
+  // ----- column drop target (canvas drag → column) -----
+
+  const findColumnDrop = useCallback(
+    (
+      client: Point,
+      draggedIds: Set<string>,
+    ): { columnId: string; index: number } | null => {
+      const state = useStore.getState();
+      const world = screenToWorld(toLocal(client), state.viewport);
+      let col: Element | null = null;
+      for (const el of Object.values(state.elements)) {
+        if (
+          el.boardId !== boardId ||
+          el.type !== 'column' ||
+          el.parentColumnId !== null ||
+          draggedIds.has(el.id)
+        )
+          continue;
+        if (
+          world.x >= el.x &&
+          world.x <= el.x + el.w &&
+          world.y >= el.y &&
+          world.y <= el.y + el.h
+        ) {
+          if (!col || el.zIndex > col.zIndex) col = el;
+        }
+      }
+      if (!col) return null;
+      const node = document.querySelector(`[data-column-id="${col.id}"]`);
+      if (!node) return null;
+      const rows = [...node.querySelectorAll('[data-child-id]')];
+      let index = rows.length;
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i]!.getBoundingClientRect();
+        if (client.y < r.top + r.height / 2) {
+          index = i;
+          break;
+        }
+      }
+      return { columnId: col.id, index };
+    },
+    [boardId, toLocal],
+  );
 
   // ----- pointer state machine -----
 
@@ -298,7 +506,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
       const snapshots = new Map<string, Element>();
       for (const id of ids) {
         const el = state.elements[id];
-        if (el) snapshots.set(id, structuredClone(el));
+        if (el && el.type !== 'line') snapshots.set(id, structuredClone(el));
       }
       interactionRef.current = {
         kind: 'drag',
@@ -317,11 +525,14 @@ export function CanvasView({ boardId }: { boardId: string }) {
 
   const onElementPointerDown = useCallback(
     (e: ReactPointerEvent, element: Element) => {
-      if (e.button === 1) return; // container handles middle-mouse pan
-      if (spaceDown) return; // container pans
-      if (editingElementId === element.id) return; // editor owns the pointer
+      if (e.button === 1) return;
+      if (spaceDown) return;
+      if (editingElementId === element.id) return;
       e.stopPropagation();
-      containerRef.current?.setPointerCapture(e.pointerId);
+      // Capture on the element itself (not the container): pointer capture
+      // retargets derived click/dblclick events, and dblclick-to-edit must
+      // still reach the element. Moves/ups bubble to the container handlers.
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (e.button !== 0) return;
       beginDrag(e, element);
@@ -346,13 +557,27 @@ export function CanvasView({ boardId }: { boardId: string }) {
     [toWorld],
   );
 
+  const onAnchorDown = useCallback(
+    (e: ReactPointerEvent, element: Element, side: Side) => {
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      containerRef.current?.setPointerCapture(e.pointerId);
+      interactionRef.current = {
+        kind: 'line-draw',
+        fromId: element.id,
+        fromSide: side,
+        moved: false,
+      };
+    },
+    [],
+  );
+
   const onCanvasPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       containerRef.current?.setPointerCapture(e.pointerId);
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (pointersRef.current.size === 2) {
-        // Second finger: switch to pinch zoom.
         const pts = [...pointersRef.current.values()];
         const dist = Math.hypot(pts[0]!.x - pts[1]!.x, pts[0]!.y - pts[1]!.y);
         pinchBaseRef.current = { dist, viewport: useStore.getState().viewport };
@@ -382,9 +607,10 @@ export function CanvasView({ boardId }: { boardId: string }) {
           moved: false,
         };
         if (state.editingElementId) setEditing(null);
+        if (openCommentId) setOpenCommentId(null);
       }
     },
-    [setEditing, spaceDown, toWorld],
+    [openCommentId, setEditing, spaceDown, toWorld],
   );
 
   const processMove = useCallback(
@@ -416,6 +642,18 @@ export function CanvasView({ boardId }: { boardId: string }) {
         return;
       }
 
+      if (interaction.kind === 'line-draw') {
+        const from = state.elements[interaction.fromId];
+        if (!from) return;
+        const a = anchorPoint(from, interaction.fromSide);
+        const world = screenToWorld(toLocal(client), state.viewport);
+        if (Math.hypot(world.x - a.x, world.y - a.y) > 8 / state.viewport.scale) {
+          interaction.moved = true;
+        }
+        setTempLine({ d: `M ${a.x} ${a.y} L ${world.x} ${world.y}` });
+        return;
+      }
+
       if (interaction.kind === 'marquee') {
         const current = screenToWorld(toLocal(client), state.viewport);
         const rect: Rect = {
@@ -431,6 +669,8 @@ export function CanvasView({ boardId }: { boardId: string }) {
             (el) =>
               el.boardId === boardId &&
               el.parentColumnId === null &&
+              el.type !== 'line' &&
+              el.type !== 'comment' &&
               rectsIntersect(rect, elementRect(el)),
           )
           .map((el) => el.id);
@@ -451,8 +691,6 @@ export function CanvasView({ boardId }: { boardId: string }) {
           interaction.moved = true;
 
           if (interaction.alt && !interaction.duplicated) {
-            // Alt-drag: duplicate in place, then drag the copies. The same
-            // coalesce key folds create + move into one undo step.
             const originals = [...interaction.snapshots.values()];
             const { command, newIds } = duplicateElementsCmd(originals, 0);
             const key = `altdrag:${newIds[0] ?? ''}`;
@@ -472,17 +710,27 @@ export function CanvasView({ boardId }: { boardId: string }) {
           }
         }
 
+        // Column drop target (only when every dragged card can live in one).
+        const draggedIds = new Set(interaction.snapshots.keys());
+        const allColumnable = [...interaction.snapshots.values()].every((el) =>
+          COLUMNABLE.has(el.type),
+        );
+        const drop = allColumnable ? findColumnDrop(client, draggedIds) : null;
+        useUiStore.getState().setColumnDropTarget(drop);
+
         const snaps = [...interaction.snapshots.values()];
         const bbox = boundingBox(snaps.map(elementRect));
         let dx = rawDx;
         let dy = rawDy;
         let nextGuides: SnapGuide[] = [];
-        if (bbox) {
+        if (bbox && !drop) {
           const moving: Rect = { ...bbox, x: bbox.x + rawDx, y: bbox.y + rawDy };
           const others = Object.values(state.elements).filter(
             (el) =>
               el.boardId === boardId &&
               el.parentColumnId === null &&
+              el.type !== 'line' &&
+              el.type !== 'comment' &&
               !interaction.snapshots.has(el.id),
           );
           const snap = computeSnap(
@@ -510,20 +758,32 @@ export function CanvasView({ boardId }: { boardId: string }) {
         const s = interaction.snapshot;
         let { x, y, w, h } = s;
         const hd = interaction.handle;
-        if (hd.includes('e')) w = Math.max(MIN_W, s.w + dx);
-        if (hd.includes('s')) h = Math.max(MIN_H, s.h + dy);
-        if (hd.includes('w')) {
-          w = Math.max(MIN_W, s.w - dx);
-          x = s.x + (s.w - w);
-        }
-        if (hd.includes('n')) {
-          h = Math.max(MIN_H, s.h - dy);
-          y = s.y + (s.h - h);
+
+        if (s.type === 'image') {
+          // Aspect-locked corner resize.
+          const ratio = s.w / Math.max(1, s.h);
+          const dw = hd.includes('w') ? -dx : dx;
+          w = Math.max(MIN_W, s.w + dw);
+          h = Math.max(MIN_H, w / ratio);
+          w = h * ratio;
+          if (hd.includes('w')) x = s.x + (s.w - w);
+          if (hd.includes('n')) y = s.y + (s.h - h);
+        } else {
+          if (hd.includes('e')) w = Math.max(MIN_W, s.w + dx);
+          if (hd.includes('s')) h = Math.max(MIN_H, s.h + dy);
+          if (hd.includes('w')) {
+            w = Math.max(MIN_W, s.w - dx);
+            x = s.x + (s.w - w);
+          }
+          if (hd.includes('n')) {
+            h = Math.max(MIN_H, s.h - dy);
+            y = s.y + (s.h - h);
+          }
         }
         updateEphemeral({ [s.id]: { x, y, w, h } });
       }
     },
-    [boardId, execute, setSelection, setViewport, toLocal, updateEphemeral],
+    [boardId, execute, findColumnDrop, setSelection, setViewport, toLocal, updateEphemeral],
   );
 
   const onPointerMove = useCallback(
@@ -532,16 +792,12 @@ export function CanvasView({ boardId }: { boardId: string }) {
         pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       }
       if (interactionRef.current.kind === 'idle') return;
-      pendingMoveRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        client: { x: e.clientX, y: e.clientY },
-      };
+      pendingMoveRef.current = { x: e.clientX, y: e.clientY };
       if (rafRef.current === null) {
         rafRef.current = requestAnimationFrame(() => {
           rafRef.current = null;
           const pending = pendingMoveRef.current;
-          if (pending) processMove(pending.client);
+          if (pending) processMove(pending);
         });
       }
     },
@@ -565,6 +821,41 @@ export function CanvasView({ boardId }: { boardId: string }) {
       setPanning(false);
       setMarqueeRect(null);
       setGuides([]);
+      setTempLine(null);
+
+      if (interaction.kind === 'line-draw') {
+        if (!interaction.moved) return;
+        const state = useStore.getState();
+        const world = toWorld({ x: e.clientX, y: e.clientY });
+        const target = topElementAt(
+          state.elements,
+          boardId,
+          world,
+          new Set([interaction.fromId]),
+        );
+        const content: LineContent = {
+          from: { elementId: interaction.fromId, side: interaction.fromSide },
+          to: target ? { elementId: target.id } : { point: world },
+          curve: false,
+          dashed: false,
+          arrowEnd: true,
+        };
+        const fromEl = state.elements[interaction.fromId];
+        const a = fromEl
+          ? anchorPoint(fromEl, interaction.fromSide)
+          : world;
+        const el = buildElement(boardId, 'line', a.x, a.y, maxZ + 1, {
+          w: 0,
+          h: 0,
+          content,
+        });
+        execute({
+          label: 'Connect',
+          changes: [{ entity: 'element', id: el.id, before: null, after: el }],
+        });
+        setSelection([el.id]);
+        return;
+      }
 
       if (interaction.kind === 'marquee') {
         if (!interaction.moved) {
@@ -575,24 +866,46 @@ export function CanvasView({ boardId }: { boardId: string }) {
 
       if (interaction.kind === 'drag') {
         const state = useStore.getState();
+        const drop = useUiStore.getState().columnDropTarget;
+        useUiStore.getState().setColumnDropTarget(null);
+
+        if (interaction.moved && drop) {
+          // Drop into a column: insert at the indicated index.
+          const children = columnChildren(state.elements, drop.columnId).filter(
+            (ch) => !interaction.snapshots.has(ch.id),
+          );
+          const beforeSi =
+            drop.index > 0
+              ? (children[Math.min(drop.index, children.length) - 1]?.sortIndex ?? 0)
+              : (children[0]?.sortIndex ?? 1) - 2;
+          const afterSi =
+            drop.index < children.length
+              ? children[drop.index]!.sortIndex
+              : beforeSi + 2;
+          const dragged = [...interaction.snapshots.values()];
+          const after = dragged.map((snap, i) => {
+            const current = state.elements[snap.id] ?? snap;
+            return {
+              ...structuredClone(current),
+              x: snap.x,
+              y: snap.y,
+              parentColumnId: drop.columnId,
+              sortIndex: beforeSi + ((afterSi - beforeSi) * (i + 1)) / (dragged.length + 1),
+            };
+          });
+          execute(updateElementsCmd('Move into column', dragged, after, interaction.coalesceKey));
+          if (interaction.coalesceKey) useStore.getState().breakCoalescing();
+          return;
+        }
+
         if (interaction.moved) {
           const before = [...interaction.snapshots.values()];
           const after = before
             .map((snap) => state.elements[snap.id])
             .filter((el): el is Element => !!el)
             .map((el) => structuredClone(el));
-          execute(
-            updateElementsCmd(
-              'Move',
-              before,
-              after,
-              interaction.coalesceKey,
-            ),
-          );
-          if (interaction.coalesceKey) {
-            // Alt-drag session ends here; next command starts fresh.
-            useStore.getState().breakCoalescing();
-          }
+          execute(updateElementsCmd('Move', before, after, interaction.coalesceKey));
+          if (interaction.coalesceKey) useStore.getState().breakCoalescing();
         } else if (interaction.toggleCandidate) {
           setSelection(
             state.selection.filter((id) => id !== interaction.toggleCandidate),
@@ -623,12 +936,11 @@ export function CanvasView({ boardId }: { boardId: string }) {
         }
       }
     },
-    [execute, setSelection],
+    [boardId, execute, maxZ, setSelection, toWorld],
   );
 
   const onDoubleClick = useCallback(
     (e: React.MouseEvent) => {
-      // Only on empty canvas (elements stop propagation of their dblclicks).
       const world = toWorld({ x: e.clientX, y: e.clientY });
       const el = buildElement(boardId, 'note', world.x, world.y - 20, maxZ + 1);
       execute({
@@ -641,118 +953,436 @@ export function CanvasView({ boardId }: { boardId: string }) {
     [boardId, execute, maxZ, setEditing, setSelection, toWorld],
   );
 
+  // ----- dnd-kit: sorting inside columns + drag out to canvas -----
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  const { setNodeRef: setCanvasDropRef } = useDroppable({ id: 'canvas' });
+
+  const collision: CollisionDetection = useCallback((args) => {
+    const within = pointerWithin(args);
+    // Child cards beat their column container; columns beat the canvas.
+    const items = within.filter(
+      (c) => c.id !== 'canvas' && !String(c.id).startsWith('column:'),
+    );
+    if (items.length > 0) return items;
+    const columns = within.filter((c) => String(c.id).startsWith('column:'));
+    return columns.length > 0 ? columns : within;
+  }, []);
+
+  const onDndStart = useCallback((e: DragStartEvent) => {
+    setDndActiveId(String(e.active.id));
+  }, []);
+
+  const onDndEnd = useCallback(
+    (e: DragEndEvent) => {
+      setDndActiveId(null);
+      const state = useStore.getState();
+      const activeId = String(e.active.id);
+      const child = state.elements[activeId];
+      if (!child || !child.parentColumnId) return;
+      const overId = e.over ? String(e.over.id) : 'canvas';
+
+      if (overId === 'canvas') {
+        // Drag out: place at the card's translated position.
+        const rect = e.active.rect.current.translated;
+        const canvasRect = containerRef.current?.getBoundingClientRect();
+        if (!rect || !canvasRect) return;
+        const world = screenToWorld(
+          { x: rect.left - canvasRect.left, y: rect.top - canvasRect.top },
+          state.viewport,
+        );
+        const after: Element = {
+          ...structuredClone(child),
+          parentColumnId: null,
+          x: world.x,
+          y: world.y,
+          zIndex: maxZ + 1,
+        };
+        execute(updateElementsCmd('Move out of column', [structuredClone(child)], [after]));
+        setSelection([activeId]);
+        return;
+      }
+
+      let targetColumnId: string;
+      let targetIndex: number;
+      if (overId.startsWith('column:')) {
+        targetColumnId = overId.slice('column:'.length);
+        // Index from the dragged card's vertical center vs. existing rows.
+        targetIndex = Number.MAX_SAFE_INTEGER;
+        const dragRect = e.active.rect.current.translated;
+        const colNode = document.querySelector(
+          `[data-column-id="${targetColumnId}"]`,
+        );
+        if (dragRect && colNode) {
+          const midY = dragRect.top + dragRect.height / 2;
+          const rows = [...colNode.querySelectorAll('[data-child-id]')].filter(
+            (r) => r.getAttribute('data-child-id') !== activeId,
+          );
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i]!.getBoundingClientRect();
+            if (midY < r.top + r.height / 2) {
+              targetIndex = i;
+              break;
+            }
+          }
+        }
+      } else {
+        const overEl = state.elements[overId];
+        if (!overEl || !overEl.parentColumnId) return;
+        targetColumnId = overEl.parentColumnId;
+        const list = columnChildren(state.elements, targetColumnId);
+        targetIndex = list.findIndex((c) => c.id === overId);
+      }
+
+      const list = columnChildren(state.elements, targetColumnId).filter(
+        (c) => c.id !== activeId,
+      );
+      const idx = Math.min(targetIndex, list.length);
+      list.splice(idx, 0, child);
+
+      const before: Element[] = [];
+      const after: Element[] = [];
+      list.forEach((el, i) => {
+        const target =
+          el.id === activeId
+            ? { ...structuredClone(el), parentColumnId: targetColumnId, sortIndex: i }
+            : { ...structuredClone(el), sortIndex: i };
+        if (el.sortIndex !== i || el.id === activeId) {
+          before.push(structuredClone(el));
+          after.push(target);
+        }
+      });
+      if (after.length > 0) {
+        execute(updateElementsCmd('Reorder column', before, after));
+      }
+    },
+    [execute, maxZ, setSelection],
+  );
+
+  const dndActiveElement = dndActiveId ? elements[dndActiveId] : undefined;
+
   // ----- render -----
 
   const spacing = GRID_SPACING * viewport.scale;
   const singleSelected =
     selectedElements.length === 1 ? selectedElements[0] : undefined;
+  const singleLine =
+    singleSelected?.type === 'line' ? singleSelected : undefined;
+  const anchorSource =
+    singleSelected &&
+    singleSelected.type !== 'line' &&
+    singleSelected.type !== 'comment' &&
+    editingElementId !== singleSelected.id
+      ? singleSelected
+      : undefined;
 
-  const handlesFor = (el: Element): Handle[] =>
-    el.type === 'note' || el.type === 'title'
-      ? ['e', 'w']
-      : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  const handlesFor = (el: Element): Handle[] => {
+    if (el.type === 'image') return ['nw', 'ne', 'se', 'sw'];
+    if (AUTO_HEIGHT.has(el.type)) return ['e', 'w'];
+    return ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  };
+
+  const setContainerRefs = useCallback(
+    (node: HTMLDivElement | null) => {
+      (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      setCanvasDropRef(node);
+    },
+    [setCanvasDropRef],
+  );
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collision}
+      onDragStart={onDndStart}
+      onDragEnd={onDndEnd}
+      onDragCancel={() => setDndActiveId(null)}
+    >
+      <div
+        ref={setContainerRefs}
+        data-testid="canvas"
+        className={`relative flex-1 touch-none overflow-hidden bg-canvas ${
+          panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : ''
+        }`}
+        style={{
+          backgroundImage:
+            'radial-gradient(circle, var(--color-grid-dot) 1px, transparent 1px)',
+          backgroundSize: `${spacing}px ${spacing}px`,
+          backgroundPosition: `${viewport.x}px ${viewport.y}px`,
+        }}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onDoubleClick={onDoubleClick}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={onDrop}
+      >
+        {/* world layer */}
+        <div
+          className="absolute left-0 top-0 origin-top-left"
+          style={{
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+          }}
+        >
+          <LineLayer
+            lines={lineElements}
+            elements={elements}
+            selection={selection}
+            onSelect={(id, additive) =>
+              setSelection(
+                additive ? [...new Set([...selection, id])] : [id],
+              )
+            }
+            temp={tempLine}
+          />
+
+          {cardElements.map((el) => (
+            <ElementView
+              key={el.id}
+              element={el}
+              selected={selection.includes(el.id)}
+              editing={editingElementId === el.id}
+              onPointerDown={onElementPointerDown}
+            />
+          ))}
+
+          {commentElements.map((el) => (
+            <CommentPin
+              key={el.id}
+              element={el}
+              elements={elements}
+              open={openCommentId === el.id}
+              onOpen={setOpenCommentId}
+            />
+          ))}
+
+          {/* line anchors on the selected card */}
+          {anchorSource && (
+            <LineAnchors element={anchorSource} scale={viewport.scale} onAnchorDown={onAnchorDown} />
+          )}
+
+          {/* resize handles for single selection */}
+          {singleSelected &&
+            singleSelected.type !== 'line' &&
+            singleSelected.type !== 'comment' &&
+            editingElementId !== singleSelected.id && (
+              <ResizeHandles
+                element={singleSelected}
+                scale={viewport.scale}
+                handles={handlesFor(singleSelected)}
+                onHandleDown={onResizeHandleDown}
+              />
+            )}
+        </div>
+
+        {/* overlay: snap guides + marquee (screen space) */}
+        <svg className="pointer-events-none absolute inset-0 h-full w-full">
+          {guides.map((g, i) =>
+            g.axis === 'x' ? (
+              <line
+                key={i}
+                x1={g.at * viewport.scale + viewport.x}
+                x2={g.at * viewport.scale + viewport.x}
+                y1={g.from * viewport.scale + viewport.y}
+                y2={g.to * viewport.scale + viewport.y}
+                stroke="var(--color-accent)"
+                strokeWidth={1}
+              />
+            ) : (
+              <line
+                key={i}
+                x1={g.from * viewport.scale + viewport.x}
+                x2={g.to * viewport.scale + viewport.x}
+                y1={g.at * viewport.scale + viewport.y}
+                y2={g.at * viewport.scale + viewport.y}
+                stroke="var(--color-accent)"
+                strokeWidth={1}
+              />
+            ),
+          )}
+          {marqueeRect && (
+            <rect
+              x={marqueeRect.x * viewport.scale + viewport.x}
+              y={marqueeRect.y * viewport.scale + viewport.y}
+              width={marqueeRect.w * viewport.scale}
+              height={marqueeRect.h * viewport.scale}
+              fill="var(--color-accent)"
+              fillOpacity={0.08}
+              stroke="var(--color-accent)"
+              strokeWidth={1}
+            />
+          )}
+        </svg>
+
+        {/* floating line property toolbar */}
+        {singleLine && (
+          <LinePropertyBar line={singleLine} elements={elements} viewport={viewport} />
+        )}
+
+        {boardElements.length === 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="max-w-sm text-center text-ink-soft">
+              <p className="text-lg font-medium">This board is empty</p>
+              <p className="mt-2 text-sm">
+                Double-click anywhere to write a note, drag an element in from
+                the toolbar, or paste an image or link.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <ZoomControls containerRef={containerRef} boardElements={cardElements} />
+      </div>
+
+      <DragOverlay>
+        {dndActiveElement ? (
+          <div
+            className="rounded-md border border-card-border bg-card shadow-card-drag"
+            style={{ width: 215 }}
+          >
+            <ElementBody element={dndActiveElement} editing={false} />
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+function LineAnchors({
+  element,
+  scale,
+  onAnchorDown,
+}: {
+  element: Element;
+  scale: number;
+  onAnchorDown: (e: ReactPointerEvent, element: Element, side: Side) => void;
+}) {
+  const size = 10 / scale;
+  const half = size / 2;
+  const spots: { side: Side; left: number; top: number }[] = [
+    { side: 'n', left: element.w / 2 - half, top: -14 / scale },
+    { side: 'e', left: element.w + 14 / scale - size, top: element.h / 2 - half },
+    { side: 's', left: element.w / 2 - half, top: element.h + 14 / scale - size },
+    { side: 'w', left: -14 / scale, top: element.h / 2 - half },
+  ];
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        left: element.x,
+        top: element.y,
+        width: element.w,
+        height: element.h,
+        zIndex: 100001,
+      }}
+    >
+      {spots.map((s) => (
+        <div
+          key={s.side}
+          data-anchor={s.side}
+          onPointerDown={(e) => onAnchorDown(e, element, s.side)}
+          className="pointer-events-auto absolute cursor-crosshair rounded-full border border-accent bg-white hover:bg-accent-soft"
+          style={{
+            left: s.left,
+            top: s.top,
+            width: size,
+            height: size,
+            borderWidth: Math.max(1, 1.5 / scale),
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function LinePropertyBar({
+  line,
+  elements,
+  viewport,
+}: {
+  line: Element;
+  elements: Record<string, Element>;
+  viewport: { x: number; y: number; scale: number };
+}) {
+  const execute = useStore((s) => s.execute);
+  const setSelection = useStore((s) => s.setSelection);
+  const c = line.content as LineContent;
+
+  // Position above the line's midpoint (screen space).
+  const geoFrom = c.from;
+  const geoTo = c.to;
+  const p1 = 'point' in geoFrom ? geoFrom.point : centerOf(elements[geoFrom.elementId]);
+  const p2 = 'point' in geoTo ? geoTo.point : centerOf(elements[geoTo.elementId]);
+  if (!p1 || !p2) return null;
+  const mid = worldToScreen(
+    { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
+    viewport,
+  );
+
+  function toggle(prop: 'curve' | 'dashed' | 'arrowEnd') {
+    const state = useStore.getState();
+    const before = state.elements[line.id];
+    if (!before) return;
+    const bc = before.content as LineContent;
+    const after: Element = { ...before, content: { ...bc, [prop]: !bc[prop] } };
+    execute({
+      label: 'Edit line',
+      changes: [{ entity: 'element', id: line.id, before, after }],
+    });
+  }
+
+  function remove() {
+    execute(deleteElementsCmd([line]));
+    setSelection([]);
+  }
+
+  const btn = (active: boolean) =>
+    `rounded p-1.5 text-xs ${active ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-panel-border/60 hover:text-ink'}`;
 
   return (
     <div
-      ref={containerRef}
-      data-testid="canvas"
-      className={`relative flex-1 touch-none overflow-hidden bg-canvas ${
-        panning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : ''
-      }`}
-      style={{
-        backgroundImage:
-          'radial-gradient(circle, var(--color-grid-dot) 1px, transparent 1px)',
-        backgroundSize: `${spacing}px ${spacing}px`,
-        backgroundPosition: `${viewport.x}px ${viewport.y}px`,
-      }}
-      onPointerDown={onCanvasPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
-      onDoubleClick={onDoubleClick}
+      className="absolute z-40 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-card-border bg-card px-1 py-0.5 shadow-card-drag"
+      style={{ left: mid.x, top: mid.y - 48 }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
     >
-      {/* world layer */}
-      <div
-        className="absolute left-0 top-0 origin-top-left"
-        style={{
-          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
-        }}
+      <button aria-label="Toggle curve" title="Curved" className={btn(c.curve)} onClick={() => toggle('curve')}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 13 C 6 13, 10 3, 14 3" stroke="currentColor" strokeWidth="1.8" />
+        </svg>
+      </button>
+      <button aria-label="Toggle dashed" title="Dashed" className={btn(c.dashed)} onClick={() => toggle('dashed')}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M1 8 H 15" stroke="currentColor" strokeWidth="1.8" strokeDasharray="3 2.5" />
+        </svg>
+      </button>
+      <button aria-label="Toggle arrowhead" title="Arrowhead" className={btn(c.arrowEnd)} onClick={() => toggle('arrowEnd')}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M1 8 H 13 M 9 4 L 13 8 L 9 12" stroke="currentColor" strokeWidth="1.8" fill="none" />
+        </svg>
+      </button>
+      <span className="mx-0.5 h-4 w-px bg-card-border" />
+      <button
+        aria-label="Delete line"
+        title="Delete"
+        className={btn(false)}
+        onClick={remove}
       >
-        {boardElements.map((el) => (
-          <ElementView
-            key={el.id}
-            element={el}
-            selected={selection.includes(el.id)}
-            editing={editingElementId === el.id}
-            onPointerDown={onElementPointerDown}
-          />
-        ))}
-
-        {/* resize handles for single selection */}
-        {singleSelected && editingElementId !== singleSelected.id && (
-          <ResizeHandles
-            element={singleSelected}
-            scale={viewport.scale}
-            handles={handlesFor(singleSelected)}
-            onHandleDown={onResizeHandleDown}
-          />
-        )}
-      </div>
-
-      {/* overlay: snap guides + marquee (screen space) */}
-      <svg className="pointer-events-none absolute inset-0 h-full w-full">
-        {guides.map((g, i) =>
-          g.axis === 'x' ? (
-            <line
-              key={i}
-              x1={g.at * viewport.scale + viewport.x}
-              x2={g.at * viewport.scale + viewport.x}
-              y1={g.from * viewport.scale + viewport.y}
-              y2={g.to * viewport.scale + viewport.y}
-              stroke="var(--color-accent)"
-              strokeWidth={1}
-            />
-          ) : (
-            <line
-              key={i}
-              x1={g.from * viewport.scale + viewport.x}
-              x2={g.to * viewport.scale + viewport.x}
-              y1={g.at * viewport.scale + viewport.y}
-              y2={g.at * viewport.scale + viewport.y}
-              stroke="var(--color-accent)"
-              strokeWidth={1}
-            />
-          ),
-        )}
-        {marqueeRect && (
-          <rect
-            x={marqueeRect.x * viewport.scale + viewport.x}
-            y={marqueeRect.y * viewport.scale + viewport.y}
-            width={marqueeRect.w * viewport.scale}
-            height={marqueeRect.h * viewport.scale}
-            fill="var(--color-accent)"
-            fillOpacity={0.08}
-            stroke="var(--color-accent)"
-            strokeWidth={1}
-          />
-        )}
-      </svg>
-
-      {boardElements.length === 0 && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="max-w-sm text-center text-ink-soft">
-            <p className="text-lg font-medium">This board is empty</p>
-            <p className="mt-2 text-sm">
-              Double-click anywhere to write a note, or drag an element in from
-              the toolbar on the left.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <ZoomControls containerRef={containerRef} boardElements={boardElements} />
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 4 H 13 M 6 4 V 2.5 H 10 V 4 M 5 4 L 5.7 13.5 H 10.3 L 11 4" stroke="currentColor" strokeWidth="1.4" fill="none" />
+        </svg>
+      </button>
     </div>
   );
+}
+
+function centerOf(el: Element | undefined): { x: number; y: number } | null {
+  if (!el) return null;
+  return { x: el.x + el.w / 2, y: el.y + el.h / 2 };
 }
 
 function ResizeHandles({
