@@ -45,8 +45,15 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
     if (url === null) return;
     if (url === '') {
       editor.chain().focus().unsetLink().run();
+    } else if (/^https?:\/\//i.test(url.trim())) {
+      editor
+        .chain()
+        .focus()
+        .extendMarkRange('link')
+        .setLink({ href: url.trim() })
+        .run();
     } else {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+      window.alert('Only http(s) links are allowed.');
     }
   }
 

@@ -56,7 +56,9 @@ export function createLinkElement(
     content: { url },
   });
   createAndSelect(el, 'Add link', `link:${el.id}`);
-  void enrichLink(el.id, url);
+  enrichLink(el.id, url).catch((e) =>
+    console.warn('Link enrichment failed:', e),
+  );
   return el.id;
 }
 
@@ -67,26 +69,33 @@ export function createLinkElement(
  */
 async function enrichLink(elementId: string, url: string): Promise<void> {
   const patch: Partial<LinkContent> = {};
+  // Defense in depth: metadata is plain text (React escapes it), but strip
+  // markup and cap length anyway so hostile pages can't store payloads.
+  const clean = (s: string | undefined) =>
+    s?.replace(/<[^>]*>/g, '').slice(0, 300) || undefined;
 
   try {
     const res = await fetch(url, {
       mode: 'cors',
       signal: AbortSignal.timeout(6000),
     });
-    if (res.ok) {
+    const size = Number(res.headers.get('content-length') ?? 0);
+    if (res.ok && size <= 2_000_000) {
       const html = await res.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const meta = (sel: string) =>
         doc.querySelector(sel)?.getAttribute('content')?.trim();
-      patch.title =
+      patch.title = clean(
         meta('meta[property="og:title"]') ??
-        meta('meta[name="twitter:title"]') ??
-        doc.title?.trim() ??
-        undefined;
-      patch.description =
+          meta('meta[name="twitter:title"]') ??
+          doc.title?.trim() ??
+          undefined,
+      );
+      patch.description = clean(
         meta('meta[property="og:description"]') ??
-        meta('meta[name="description"]') ??
-        undefined;
+          meta('meta[name="description"]') ??
+          undefined,
+      );
     }
   } catch {
     // CORS or network failure — the card falls back to domain + URL.

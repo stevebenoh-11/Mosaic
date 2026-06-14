@@ -36,7 +36,9 @@ export class Persister {
     this.dirty.set(`${entity}:${id}`, { entity, id, boardId });
     this.onStateChange('saving');
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.flush(), this.debounceMs);
+    this.timer = setTimeout(() => {
+      this.flush().catch((e) => console.error('Background save failed:', e));
+    }, this.debounceMs);
   }
 
   /** Flush now (also chained behind any in-flight flush). */
@@ -56,7 +58,17 @@ export class Persister {
     this.flushing = this.writeBatch(batch).finally(() => {
       this.flushing = null;
     });
-    await this.flushing;
+    try {
+      await this.flushing;
+    } catch (e) {
+      // Failed writes stay queued (unless re-dirtied meanwhile) so the next
+      // edit or flush retries them instead of silently dropping changes.
+      for (const entry of batch) {
+        const key = `${entry.entity}:${entry.id}`;
+        if (!this.dirty.has(key)) this.dirty.set(key, entry);
+      }
+      throw e;
+    }
     if (this.dirty.size === 0) this.onStateChange('saved');
   }
 

@@ -1,12 +1,28 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, HashRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import { useStore } from './store';
 import './index.css';
 
-registerSW({ immediate: true });
+// No service worker under file:// (packaged Electron) — registration would
+// reject and the app runs fully offline there anyway.
+if (window.location.protocol !== 'file:') {
+  try {
+    registerSW({ immediate: true });
+  } catch (e) {
+    console.warn('Service worker registration failed:', e);
+  }
+}
+
+// Last-resort logging so background failures (sync, persistence) surface in
+// diagnostics instead of dying as silent unhandled rejections.
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('Unhandled rejection:', e.reason);
+  e.preventDefault();
+});
 
 // Exposed for e2e tests and debugging (read-only usage expected).
 declare global {
@@ -69,10 +85,16 @@ window.__mosaicSeedStress = async (count = 1500) => {
   return boardId;
 };
 
+// Packaged Electron loads the app from file://, where path-based routing
+// can't work — fall back to hash-based routing there.
+const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <Router>
+        <App />
+      </Router>
+    </ErrorBoundary>
   </React.StrictMode>,
 );

@@ -267,12 +267,22 @@ export function CanvasView({ boardId }: { boardId: string }) {
       if (images.length > 0) {
         e.preventDefault();
         const base = centerWorld();
-        images.forEach((f, i) => {
-          void createImageElement(boardId, f, f.name || 'pasted-image', {
-            x: base.x + i * 24,
-            y: base.y + i * 24,
-          });
-        });
+        void (async () => {
+          for (const [i, f] of images.entries()) {
+            try {
+              await createImageElement(boardId, f, f.name || 'pasted-image', {
+                x: base.x + i * 24,
+                y: base.y + i * 24,
+              });
+            } catch (err) {
+              console.error('Image paste failed:', err);
+              window.alert(
+                err instanceof Error ? err.message : 'Could not add image.',
+              );
+              break;
+            }
+          }
+        })();
         return;
       }
       const text = e.clipboardData?.getData('text/plain')?.trim();
@@ -312,12 +322,22 @@ export function CanvasView({ boardId }: { boardId: string }) {
         f.type.startsWith('image/'),
       );
       if (files.length > 0) {
-        files.forEach((f, i) => {
-          void createImageElement(boardId, f, f.name, {
-            x: world.x + i * 24,
-            y: world.y + i * 24,
-          });
-        });
+        void (async () => {
+          for (const [i, f] of files.entries()) {
+            try {
+              await createImageElement(boardId, f, f.name, {
+                x: world.x + i * 24,
+                y: world.y + i * 24,
+              });
+            } catch (err) {
+              console.error('Image drop failed:', err);
+              window.alert(
+                err instanceof Error ? err.message : 'Could not add image.',
+              );
+              break;
+            }
+          }
+        })();
         return;
       }
       const uri = e.dataTransfer.getData('text/uri-list') ||

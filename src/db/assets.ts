@@ -21,7 +21,20 @@ export async function probeImageSize(
   }
 }
 
+/** Hard cap per image: protects IndexedDB quota and sync upload paths. */
+export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
+
+function isQuotaError(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name;
+  return name === 'QuotaExceededError' || /quota/i.test(String(e));
+}
+
 export async function saveAsset(blob: Blob, name: string): Promise<Asset> {
+  if (blob.size > MAX_ASSET_BYTES) {
+    throw new Error(
+      `Image "${name}" is too large (${Math.round(blob.size / 1024 / 1024)} MB, max 25 MB).`,
+    );
+  }
   const { width, height } = await probeImageSize(blob);
   const asset: Asset = {
     id: newId(),
@@ -32,18 +45,34 @@ export async function saveAsset(blob: Blob, name: string): Promise<Asset> {
     width: width || undefined,
     height: height || undefined,
   };
-  await db.assets.put(asset);
-  await db.outbox.add({
-    entityType: 'asset',
-    entityId: asset.id,
-    boardId: null,
-    queuedAt: Date.now(),
-  });
+  try {
+    // One transaction so a failure can't leave an asset without its outbox
+    // entry (or vice versa).
+    await db.transaction('rw', [db.assets, db.outbox], async () => {
+      await db.assets.put(asset);
+      await db.outbox.add({
+        entityType: 'asset',
+        entityId: asset.id,
+        boardId: null,
+        queuedAt: Date.now(),
+      });
+    });
+  } catch (e) {
+    if (isQuotaError(e)) {
+      throw new Error(
+        'Storage is full — delete some boards or images, then try again.',
+      );
+    }
+    throw e;
+  }
   return asset;
 }
 
 // Object-URL cache so every card render doesn't re-create blob URLs.
+// LRU-capped: object URLs pin their blobs in memory, so an unbounded cache
+// grows until the tab is OOM-killed on image-heavy workspaces.
 const urlCache = new Map<string, string>();
+const MAX_CACHED_URLS = 300;
 
 /** Sync layer hook: fetch a missing asset from the remote (returns success). */
 let remoteAssetFetcher: ((assetId: string) => Promise<boolean>) | null = null;
@@ -55,7 +84,12 @@ export function setRemoteAssetFetcher(
 
 export async function getAssetUrl(assetId: string): Promise<string | null> {
   const cached = urlCache.get(assetId);
-  if (cached) return cached;
+  if (cached) {
+    // Re-insert to mark as most recently used.
+    urlCache.delete(assetId);
+    urlCache.set(assetId, cached);
+    return cached;
+  }
   let asset = await db.assets.get(assetId);
   if (!asset && remoteAssetFetcher) {
     // Lazy download: the board referenced an asset we don't have yet.
@@ -65,5 +99,10 @@ export async function getAssetUrl(assetId: string): Promise<string | null> {
   if (!asset) return null;
   const url = URL.createObjectURL(asset.blob);
   urlCache.set(assetId, url);
+  if (urlCache.size > MAX_CACHED_URLS) {
+    const [oldId, oldUrl] = urlCache.entries().next().value!;
+    urlCache.delete(oldId);
+    URL.revokeObjectURL(oldUrl);
+  }
   return url;
 }

@@ -148,6 +148,45 @@ export async function exportBackupZip(): Promise<void> {
   download(blob, `mosaic-backup-${stamp}.zip`);
 }
 
+// Backup zips are untrusted input: validate row shapes before they reach the
+// database, and scrub link URLs that could smuggle javascript: hrefs.
+function isValidBoard(obj: unknown): obj is Board {
+  const b = obj as Record<string, unknown>;
+  return (
+    !!b &&
+    typeof b.id === 'string' &&
+    typeof b.title === 'string' &&
+    (b.parentBoardId === null || typeof b.parentBoardId === 'string') &&
+    typeof b.sortIndex === 'number' &&
+    typeof b.createdAt === 'number' &&
+    typeof b.updatedAt === 'number'
+  );
+}
+
+function isValidElement(obj: unknown): obj is Element {
+  const e = obj as Record<string, unknown>;
+  return (
+    !!e &&
+    typeof e.id === 'string' &&
+    typeof e.boardId === 'string' &&
+    typeof e.type === 'string' &&
+    typeof e.x === 'number' &&
+    typeof e.y === 'number' &&
+    typeof e.w === 'number' &&
+    typeof e.h === 'number' &&
+    typeof e.zIndex === 'number' &&
+    typeof e.content === 'object' &&
+    e.content !== null
+  );
+}
+
+function scrubElement(el: Element): Element {
+  if (el.type !== 'link') return el;
+  const c = el.content as { url?: unknown };
+  if (typeof c.url === 'string' && /^https?:\/\//i.test(c.url)) return el;
+  return { ...el, content: { ...(el.content as object), url: '' } };
+}
+
 /** Restore a backup zip, REPLACING the current workspace. */
 export async function importBackupZip(file: File): Promise<{ boards: number; elements: number }> {
   const zip = await JSZip.loadAsync(file);
@@ -156,6 +195,11 @@ export async function importBackupZip(file: File): Promise<{ boards: number; ele
   const manifest = JSON.parse(await manifestFile.async('text')) as BackupManifest;
   if (!Array.isArray(manifest.boards) || !Array.isArray(manifest.elements)) {
     throw new Error('Backup manifest is malformed');
+  }
+  manifest.boards = manifest.boards.filter(isValidBoard);
+  manifest.elements = manifest.elements.filter(isValidElement).map(scrubElement);
+  if (manifest.boards.length === 0) {
+    throw new Error('Backup contains no valid boards');
   }
 
   const assets: Asset[] = [];

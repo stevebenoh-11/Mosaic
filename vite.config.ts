@@ -4,8 +4,11 @@ import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'node:path';
 
+// NOTE: web builds use the default absolute base ('/'). A relative base breaks
+// SPA deep links (/b/<id> resolves assets to /b/assets/* → blank page). The
+// Electron build needs relative paths for file:// and passes --base=./ on the
+// CLI instead (see electron:* scripts).
 export default defineConfig({
-  base: './',
   plugins: [
     react(),
     tailwindcss(),

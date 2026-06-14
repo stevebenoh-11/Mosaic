@@ -18,6 +18,8 @@ export const LinkCard = memo(function LinkCard({
   } catch {
     // keep raw url
   }
+  // Synced/imported content is untrusted — never render a non-http(s) href.
+  const safeHref = /^https?:\/\//i.test(c.url) ? c.url : undefined;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -43,7 +45,7 @@ export const LinkCard = memo(function LinkCard({
             <Globe className="h-3.5 w-3.5 text-ink-soft" />
           )}
           <a
-            href={c.url}
+            href={safeHref}
             target="_blank"
             rel="noreferrer noopener"
             onPointerDown={(e) => e.stopPropagation()}

@@ -18,6 +18,8 @@ export type SaveState = 'saved' | 'saving';
 
 interface AppState {
   ready: boolean;
+  /** Fatal storage failure during startup (private browsing, corrupted db). */
+  initError: string | null;
   deviceId: string;
   boards: Record<string, Board>;
   /** Elements of the currently open board (plus any recently touched by commands). */
@@ -89,6 +91,7 @@ export const useStore = create<AppState>((set, get) => {
 
   return {
     ready: false,
+    initError: null,
     deviceId: '',
     boards: {},
     elements: {},
@@ -101,11 +104,23 @@ export const useStore = create<AppState>((set, get) => {
     canRedo: false,
 
     async init() {
-      const { deviceId } = await bootstrapDb();
-      const boardRows = await db.boards.toArray();
-      const boards: Record<string, Board> = {};
-      for (const b of boardRows) boards[b.id] = b;
-      set({ deviceId, boards, ready: true });
+      try {
+        const { deviceId } = await bootstrapDb();
+        const boardRows = await db.boards.toArray();
+        const boards: Record<string, Board> = {};
+        for (const b of boardRows) boards[b.id] = b;
+        set({ deviceId, boards, ready: true });
+      } catch (e) {
+        // IndexedDB unavailable (private browsing, quota, corruption): show a
+        // recovery screen instead of hanging on "Loading…" forever.
+        console.error('Storage initialization failed:', e);
+        set({
+          ready: true,
+          initError:
+            'Local storage is unavailable. This can happen in private browsing ' +
+            'mode or when disk space runs out.',
+        });
+      }
     },
 
     async openBoard(boardId) {

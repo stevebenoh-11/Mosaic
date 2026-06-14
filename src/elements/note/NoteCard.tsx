@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { generateHTML } from '@tiptap/core';
+import DOMPurify from 'dompurify';
 import { useStore } from '@/store';
 import { updateElementsCmd } from '@/store/elementCommands';
 import type { Element, NoteContent, TipTapDoc } from '@/db/types';
@@ -12,7 +13,12 @@ const EXTENSIONS = noteExtensions();
 function StaticNote({ doc }: { doc: TipTapDoc }) {
   const html = useMemo(() => {
     try {
-      return generateHTML(doc as Parameters<typeof generateHTML>[0], EXTENSIONS);
+      // Sanitize: note docs can arrive from sync or backup import, so the
+      // TipTap JSON is untrusted (e.g. javascript: hrefs injected into marks).
+      return DOMPurify.sanitize(
+        generateHTML(doc as Parameters<typeof generateHTML>[0], EXTENSIONS),
+        { USE_PROFILES: { html: true } },
+      );
     } catch {
       return '';
     }

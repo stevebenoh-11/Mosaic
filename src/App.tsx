@@ -18,7 +18,11 @@ function BoardPage() {
   const boardExists = useStore((s) => (boardId ? !!s.boards[boardId] : false));
 
   useEffect(() => {
-    if (boardId && boardExists) void openBoard(boardId);
+    if (boardId && boardExists) {
+      openBoard(boardId).catch((e) =>
+        console.error('Failed to open board:', e),
+      );
+    }
   }, [boardId, boardExists, openBoard]);
 
   if (!boardId || !boardExists) return <HomeRedirect />;
@@ -52,15 +56,22 @@ function HomeRedirect() {
 
 export default function App() {
   const ready = useStore((s) => s.ready);
+  const initError = useStore((s) => s.initError);
   const init = useStore((s) => s.init);
 
   useEffect(() => {
-    void init().then(() => initSync());
+    init()
+      .then(() => initSync())
+      .catch((e) => console.error('Startup failed:', e));
   }, [init]);
 
   // Best-effort flush of pending writes when the tab hides or unloads.
   useEffect(() => {
-    const flush = () => void useStore.getState().flushNow();
+    const flush = () =>
+      useStore
+        .getState()
+        .flushNow()
+        .catch((e) => console.error('Flush on hide failed:', e));
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') flush();
     };
@@ -91,6 +102,22 @@ export default function App() {
     return (
       <div className="flex h-full items-center justify-center text-ink-soft">
         Loading…
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <div className="text-lg font-semibold">Can&apos;t access local storage</div>
+        <div className="max-w-md text-sm text-ink-soft">{initError}</div>
+        <button
+          type="button"
+          className="mt-2 rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          onClick={() => window.location.reload()}
+        >
+          Try again
+        </button>
       </div>
     );
   }

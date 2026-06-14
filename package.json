@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "electron:dev": "electron .",
-    "electron:build": "npm run build && electron-packager . Mosaic --platform=win32 --arch=x64 --out=dist-electron --overwrite --ignore=dist-electron && powershell -Command \"Compress-Archive -Path dist-electron/Mosaic-win32-x64/* -DestinationPath dist-electron/Mosaic-portable.zip -Force\"",
+    "electron:installer": "tsc -b && vite build --base=./ && electron-builder --win",
+    "electron:build": "tsc -b && vite build --base=./ && electron-packager . Mosaic --platform=win32 --arch=x64 --out=dist-electron --overwrite --ignore=\"^/(?!dist($|/)|main\\.cjs$|preload\\.cjs$|package\\.json$)\" && powershell -Command \"Compress-Archive -Path dist-electron/Mosaic-win32-x64/* -DestinationPath dist-electron/Mosaic-portable.zip -Force\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -29,6 +30,7 @@
     "@tiptap/react": "^2.27.2",
     "@tiptap/starter-kit": "^2.27.2",
     "dexie": "^4.0.11",
+    "dompurify": "^3.4.9",
     "html-to-image": "^1.11.13",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
@@ -61,8 +63,9 @@
     "appId": "com.mosaic.app",
     "productName": "Mosaic",
     "directories": {
-      "output": "dist-electron"
+      "output": "release"
     },
+    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
       "main.cjs",
