@@ -67,6 +67,27 @@ body {
   outline-offset: 1px;
 }
 
+/* Swatch colour-picker sliders: visible draggable thumb over the gradient track */
+.swatch-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid rgb(0 0 0 / 0.45);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.45);
+  cursor: pointer;
+}
+.swatch-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 2px solid rgb(0 0 0 / 0.45);
+  cursor: pointer;
+}
+
 /* ---- Note rich-text content (TipTap editor + static rendering) ---- */
 .note-prose {
   line-height: 1.5;

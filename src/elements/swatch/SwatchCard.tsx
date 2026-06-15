@@ -1,6 +1,7 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useStore } from '@/store';
 import type { Element, SwatchContent } from '@/db/types';
+import { hexToHsl, hslToHex, type Hsl } from './color';
 
 /** Curated palette shown on the card for one-click colour swapping. */
 const PRESETS = [
@@ -24,6 +25,68 @@ function commitSwatch(element: Element, patch: Partial<SwatchContent>, label: st
   });
 }
 
+/** Inline colour picker: a rainbow hue "cycle" plus saturation/lightness. */
+function ColorPicker({ element, hex }: { element: Element; hex: string }) {
+  // Keep HSL in local state so dragging the hue past grey/black/white doesn't
+  // make the slider jump (those colours have an ambiguous hue).
+  const [hsl, setHsl] = useState<Hsl>(() => hexToHsl(hex));
+
+  // Re-sync when the colour changes from outside this picker (preset click, undo).
+  useEffect(() => {
+    const next = hexToHsl(hex);
+    setHsl((prev) =>
+      hslToHex(prev) === hex.toUpperCase() ? prev : next,
+    );
+  }, [hex]);
+
+  function update(patch: Partial<Hsl>) {
+    const next = { ...hsl, ...patch };
+    setHsl(next);
+    commitSwatch(element, { hex: hslToHex(next) }, 'Change color');
+  }
+
+  const hueTrack =
+    'linear-gradient(to right,#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)';
+  const satTrack = `linear-gradient(to right,hsl(${hsl.h},0%,${hsl.l}%),hsl(${hsl.h},100%,${hsl.l}%))`;
+  const lightTrack = `linear-gradient(to right,#000,hsl(${hsl.h},${hsl.s}%,50%),#fff)`;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Slider label="Hue" max={360} value={hsl.h} track={hueTrack} onChange={(h) => update({ h })} />
+      <Slider label="Saturation" max={100} value={hsl.s} track={satTrack} onChange={(s) => update({ s })} />
+      <Slider label="Lightness" max={100} value={hsl.l} track={lightTrack} onChange={(l) => update({ l })} />
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  max,
+  track,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  track: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <input
+      type="range"
+      min={0}
+      max={max}
+      value={value}
+      aria-label={label}
+      onPointerDown={(e) => e.stopPropagation()}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="swatch-range h-3 w-full cursor-pointer appearance-none rounded-full"
+      style={{ background: track }}
+    />
+  );
+}
+
 export const SwatchCard = memo(function SwatchCard({
   element,
   editing,
@@ -38,9 +101,10 @@ export const SwatchCard = memo(function SwatchCard({
       <div className="relative min-h-12 flex-1" style={{ background: c.hex }}>
         {editing && (
           <div
-            className="absolute inset-x-0 bottom-0 flex flex-col gap-1.5 bg-black/35 p-1.5 backdrop-blur-sm"
+            className="absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-black/45 p-2 backdrop-blur-sm"
             onPointerDown={(e) => e.stopPropagation()}
           >
+            <ColorPicker element={element} hex={c.hex} />
             <div className="flex flex-wrap gap-1">
               {PRESETS.map((hex) => (
                 <button
@@ -58,16 +122,6 @@ export const SwatchCard = memo(function SwatchCard({
                 />
               ))}
             </div>
-            <label className="flex items-center gap-1.5 text-[10px] font-medium text-white/90">
-              Custom
-              <input
-                type="color"
-                aria-label="Swatch color"
-                value={c.hex}
-                onChange={(e) => commitSwatch(element, { hex: e.target.value }, 'Change color')}
-                className="h-5 w-7 cursor-pointer rounded border border-white/60 bg-transparent"
-              />
-            </label>
           </div>
         )}
       </div>
@@ -77,10 +131,8 @@ export const SwatchCard = memo(function SwatchCard({
             value={c.label ?? ''}
             placeholder="Label"
             aria-label="Swatch label"
-            autoFocus
             onPointerDown={(e) => e.stopPropagation()}
             onChange={(e) => commitSwatch(element, { label: e.target.value }, 'Edit label')}
-            onBlur={() => useStore.getState().setEditing(null)}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === 'Enter' || e.key === 'Escape') {
