@@ -1591,6 +1591,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
               elements={elements}
               open={openCommentId === el.id}
               onOpen={setOpenCommentId}
+              scale={viewport.scale}
             />
           ))}
 

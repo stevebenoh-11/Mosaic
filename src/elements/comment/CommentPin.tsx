@@ -95,16 +95,98 @@ export const CommentPin = memo(function CommentPin({
   elements,
   open,
   onOpen,
+  scale,
 }: {
   element: Element;
   elements: Record<string, Element>;
   open: boolean;
   onOpen: (id: string | null) => void;
+  /** Canvas zoom — converts screen drag distance to world units. */
+  scale: number;
 }) {
   const c = element.content as CommentContentEx;
   const pos = commentPosition(element, elements);
   const execute = useStore((s) => s.execute);
   const setSelection = useStore((s) => s.setSelection);
+  const updateEphemeral = useStore((s) => s.updateEphemeral);
+
+  // Pointer-drag the pin: free comments move their x/y; attached comments
+  // adjust their offset from the target. A drag under the threshold is treated
+  // as a click (toggle the panel).
+  const drag = useRef<{
+    sx: number;
+    sy: number;
+    moved: boolean;
+    snapshot: Element;
+    attached: boolean;
+    baseX: number;
+    baseY: number;
+  } | null>(null);
+
+  function onPinDown(e: React.PointerEvent) {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const cur = useStore.getState().elements[element.id];
+    if (!cur) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const cc = cur.content as CommentContentEx;
+    const target = cc.targetElementId ? elements[cc.targetElementId] : undefined;
+    const p = commentPosition(cur, elements);
+    drag.current = {
+      sx: e.clientX,
+      sy: e.clientY,
+      moved: false,
+      snapshot: structuredClone(cur),
+      attached: !!target,
+      // Base = current offset (attached) or absolute position (free).
+      baseX: target ? p.x - target.x : cur.x,
+      baseY: target ? p.y - target.y : cur.y,
+    };
+  }
+
+  function onPinMove(e: React.PointerEvent) {
+    const d = drag.current;
+    if (!d) return;
+    if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4) return;
+    d.moved = true;
+    const cur = useStore.getState().elements[element.id];
+    if (!cur) return;
+    const dx = (e.clientX - d.sx) / scale;
+    const dy = (e.clientY - d.sy) / scale;
+    if (d.attached) {
+      updateEphemeral({
+        [element.id]: {
+          content: {
+            ...(cur.content as CommentContentEx),
+            offsetX: d.baseX + dx,
+            offsetY: d.baseY + dy,
+          } as Element['content'],
+        },
+      });
+    } else {
+      updateEphemeral({ [element.id]: { x: d.baseX + dx, y: d.baseY + dy } });
+    }
+  }
+
+  function onPinUp(e: React.PointerEvent) {
+    const d = drag.current;
+    drag.current = null;
+    if (!d) return;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (!d.moved) {
+      onOpen(open ? null : element.id); // treat as a click
+      return;
+    }
+    const cur = useStore.getState().elements[element.id];
+    if (!cur) return;
+    execute({
+      label: 'Move comment',
+      changes: [
+        { entity: 'element', id: element.id, before: d.snapshot, after: structuredClone(cur) },
+      ],
+    });
+    setSelection([element.id]);
+  }
 
   function toggleResolved() {
     const state = useStore.getState();
@@ -135,9 +217,11 @@ export const CommentPin = memo(function CommentPin({
     >
       <button
         aria-label={c.resolved ? 'Resolved comment' : 'Comment'}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => onOpen(open ? null : element.id)}
-        className={`flex h-8 w-8 items-center justify-center rounded-full rounded-bl-none border shadow-card ${
+        onPointerDown={onPinDown}
+        onPointerMove={onPinMove}
+        onPointerUp={onPinUp}
+        onPointerCancel={onPinUp}
+        className={`flex h-8 w-8 cursor-grab touch-none items-center justify-center rounded-full rounded-bl-none border shadow-card active:cursor-grabbing ${
           c.resolved
             ? 'border-card-border bg-panel text-ink-soft'
             : 'border-accent bg-accent text-white'
