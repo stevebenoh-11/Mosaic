@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '@/store';
-import type { BoardLinkContent, Element } from '@/db/types';
+import type { BoardLinkContent, Element, LinkContent } from '@/db/types';
 import { ElementBody } from './ElementBody';
 
 /** Types whose height follows their content (measured, not dragged). */
@@ -65,6 +65,12 @@ export const ElementView = memo(function ElementView({
         if (element.type === 'boardLink') {
           const target = (element.content as BoardLinkContent).boardId;
           if (useStore.getState().boards[target]) navigate(`/b/${target}`);
+        }
+        if (element.type === 'link') {
+          const url = (element.content as LinkContent).url;
+          if (/^https?:\/\//i.test(url)) {
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }
         }
       }}
       className={[

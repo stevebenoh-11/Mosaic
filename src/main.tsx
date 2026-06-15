@@ -4,8 +4,12 @@ import { BrowserRouter, HashRouter } from 'react-router-dom';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+import { applyTheme, useUiStore } from './ui/uiStore';
 import { useStore } from './store';
 import './index.css';
+
+// Apply the saved theme before first paint to avoid a light-mode flash.
+applyTheme(useUiStore.getState().theme);
 
 // No service worker under file:// (packaged Electron) — registration would
 // reject and the app runs fully offline there anyway.

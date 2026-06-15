@@ -20,7 +20,7 @@ import {
 } from '@dnd-kit/core';
 import { useStore } from '@/store';
 import { useUiStore, isTypingTarget } from '@/ui/uiStore';
-import type { Element, LineContent } from '@/db/types';
+import type { Element, LineContent, LineEndpoint } from '@/db/types';
 import {
   buildElement,
   deleteElementsCmd,
@@ -32,7 +32,7 @@ import { ElementView, AUTO_HEIGHT } from '@/elements/ElementView';
 import { ElementBody, COLUMNABLE } from '@/elements/ElementBody';
 import { columnChildren } from '@/elements/column/ColumnCard';
 import { LineLayer } from '@/elements/line/LineLayer';
-import { anchorPoint, type Side } from '@/elements/line/geometry';
+import { anchorPoint, linePath, type ResolvedEnd, type Side } from '@/elements/line/geometry';
 import { CommentPin } from '@/elements/comment/CommentPin';
 import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
 import { cloneElements, moveElementsToBoardCmd } from '@/store/boardCommands';
@@ -96,6 +96,13 @@ type Interaction =
       startWorld: Point;
     }
   | { kind: 'line-draw'; fromId: string; fromSide: Side; moved: boolean }
+  | {
+      kind: 'line-endpoint';
+      lineId: string;
+      end: 'from' | 'to';
+      snapshot: Element;
+      moved: boolean;
+    }
   | { kind: 'draw'; points: number[] }
   | { kind: 'erase'; gesture: string }
   | { kind: 'pinch' };
@@ -385,6 +392,12 @@ export function CanvasView({ boardId }: { boardId: string }) {
         if (interaction.kind === 'line-draw') {
           interactionRef.current = { kind: 'idle' };
           setTempLine(null);
+          return;
+        }
+        if (interaction.kind === 'line-endpoint') {
+          // Restore the endpoint to where the drag started.
+          updateEphemeral({ [interaction.lineId]: { content: interaction.snapshot.content } });
+          interactionRef.current = { kind: 'idle' };
           return;
         }
         if (interaction.kind === 'marquee') {
@@ -683,6 +696,22 @@ export function CanvasView({ boardId }: { boardId: string }) {
     [],
   );
 
+  const onLineEndpointDown = useCallback(
+    (e: ReactPointerEvent, line: Element, end: 'from' | 'to') => {
+      e.stopPropagation();
+      if (e.button !== 0) return;
+      containerRef.current?.setPointerCapture(e.pointerId);
+      interactionRef.current = {
+        kind: 'line-endpoint',
+        lineId: line.id,
+        end,
+        snapshot: structuredClone(line),
+        moved: false,
+      };
+    },
+    [],
+  );
+
   const onCanvasPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       containerRef.current?.setPointerCapture(e.pointerId);
@@ -824,6 +853,19 @@ export function CanvasView({ boardId }: { boardId: string }) {
           interaction.moved = true;
         }
         setTempLine({ d: `M ${a.x} ${a.y} L ${world.x} ${world.y}` });
+        return;
+      }
+
+      if (interaction.kind === 'line-endpoint') {
+        const cur = state.elements[interaction.lineId];
+        if (!cur) return;
+        const world = screenToWorld(toLocal(client), state.viewport);
+        interaction.moved = true;
+        const content: LineContent = {
+          ...(cur.content as LineContent),
+          [interaction.end]: { point: world },
+        };
+        updateEphemeral({ [interaction.lineId]: { content } });
         return;
       }
 
@@ -1134,6 +1176,29 @@ export function CanvasView({ boardId }: { boardId: string }) {
           changes: [{ entity: 'element', id: el.id, before: null, after: el }],
         });
         setSelection([el.id]);
+        return;
+      }
+
+      if (interaction.kind === 'line-endpoint') {
+        if (!interaction.moved) return;
+        const state = useStore.getState();
+        const world = toWorld({ x: e.clientX, y: e.clientY });
+        const before = interaction.snapshot;
+        // Snap onto a card under the cursor, otherwise drop as a free point.
+        const target = topElementAt(
+          state.elements,
+          boardId,
+          world,
+          new Set([interaction.lineId]),
+        );
+        const endpoint: LineEndpoint = target
+          ? { elementId: target.id }
+          : { point: world };
+        const after: Element = {
+          ...before,
+          content: { ...(before.content as LineContent), [interaction.end]: endpoint },
+        };
+        execute(updateElementsCmd('Move endpoint', [before], [after]));
         return;
       }
 
@@ -1542,6 +1607,16 @@ export function CanvasView({ boardId }: { boardId: string }) {
             <LineAnchors element={anchorSource} scale={viewport.scale} onAnchorDown={onAnchorDown} />
           )}
 
+          {/* draggable endpoints on the selected line */}
+          {singleLine && (
+            <LineEndpoints
+              line={singleLine}
+              elements={elements}
+              scale={viewport.scale}
+              onEndpointDown={onLineEndpointDown}
+            />
+          )}
+
           {/* resize handles for single selection */}
           {singleSelected &&
             singleSelected.type !== 'line' &&
@@ -1630,6 +1705,47 @@ export function CanvasView({ boardId }: { boardId: string }) {
   );
 }
 
+function LineEndpoints({
+  line,
+  elements,
+  scale,
+  onEndpointDown,
+}: {
+  line: Element;
+  elements: Record<string, Element>;
+  scale: number;
+  onEndpointDown: (e: ReactPointerEvent, line: Element, end: 'from' | 'to') => void;
+}) {
+  const geo = linePath(line.content as LineContent, elements);
+  if (!geo) return null;
+  const size = 12 / scale;
+  const half = size / 2;
+  const dot = (p: ResolvedEnd, end: 'from' | 'to') => (
+    <div
+      key={end}
+      aria-label={`Line ${end} endpoint`}
+      onPointerDown={(e) => onEndpointDown(e, line, end)}
+      className="pointer-events-auto absolute cursor-grab rounded-full border border-accent bg-card hover:bg-accent-soft"
+      style={{
+        left: p.x - half,
+        top: p.y - half,
+        width: size,
+        height: size,
+        borderWidth: Math.max(1.5, 2 / scale),
+      }}
+    />
+  );
+  return (
+    <div
+      className="pointer-events-none absolute left-0 top-0"
+      style={{ zIndex: 100002 }}
+    >
+      {dot(geo.from, 'from')}
+      {dot(geo.to, 'to')}
+    </div>
+  );
+}
+
 function LineAnchors({
   element,
   scale,
@@ -1700,6 +1816,9 @@ function LinePropertyBar({
     { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 },
     viewport,
   );
+  // Keep the bar on-screen: when the line's midpoint is near the top edge,
+  // its default position (mid.y - 48) would render the bar off-canvas.
+  const barTop = mid.y - 48 < 8 ? mid.y + 24 : mid.y - 48;
 
   function toggle(prop: 'curve' | 'dashed' | 'arrowEnd') {
     const state = useStore.getState();
@@ -1724,7 +1843,7 @@ function LinePropertyBar({
   return (
     <div
       className="absolute z-40 flex -translate-x-1/2 items-center gap-0.5 rounded-lg border border-card-border bg-card px-1 py-0.5 shadow-card-drag"
-      style={{ left: mid.x, top: mid.y - 48 }}
+      style={{ left: mid.x, top: barTop }}
       onPointerDown={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
     >

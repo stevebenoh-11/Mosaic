@@ -6,7 +6,7 @@ import { db, getMeta, setMeta } from '@/db/schema';
 import { newId } from '@/db/ids';
 import type { Board } from '@/db/types';
 import { buildElement } from '@/store/elementCommands';
-import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
+import { createImageElement, createLinkElement, normalizeUrl } from '@/elements/createFromMedia';
 import { screenToWorld } from '@/canvas/coords';
 
 /** Find or create the pinned "Inbox" board (id remembered in meta). */
@@ -95,10 +95,15 @@ export function QuickCapture({ boardId }: { boardId: string }) {
     const spot = await freeSpot(target);
     for (let i = 0; i < files.length; i++) {
       const f = files[i]!;
-      await createImageElement(target, f, f.name || 'photo', {
-        x: spot.x + i * 24,
-        y: spot.y + i * 24,
-      });
+      try {
+        await createImageElement(target, f, f.name || 'photo', {
+          x: spot.x + i * 24,
+          y: spot.y + i * 24,
+        });
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : 'Could not add image.');
+        break;
+      }
     }
     const state = useStore.getState();
     if (target !== state.currentBoardId) navigate(`/b/${target}`);
@@ -106,11 +111,16 @@ export function QuickCapture({ boardId }: { boardId: string }) {
 
   async function addLink() {
     setOpen(false);
-    const url = window.prompt('Link URL', 'https://');
-    if (!url || !URL_RE.test(url.trim())) return;
+    const input = window.prompt('Link URL', 'https://');
+    if (input === null) return;
+    const url = normalizeUrl(input);
+    if (!url) {
+      if (input.trim()) window.alert('That doesn’t look like a valid web link.');
+      return;
+    }
     const target = await targetBoard();
     const spot = await freeSpot(target);
-    createLinkElement(target, url.trim(), spot);
+    createLinkElement(target, url, spot);
     const state = useStore.getState();
     if (target !== state.currentBoardId) navigate(`/b/${target}`);
   }

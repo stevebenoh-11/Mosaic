@@ -19,7 +19,7 @@ import { buildElement } from '@/store/elementCommands';
 import { newId as newBoardId } from '@/db/ids';
 import { screenToWorld } from '@/canvas/coords';
 import { topElementAt } from '@/canvas/hitTest';
-import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
+import { createImageElement, createLinkElement, normalizeUrl } from '@/elements/createFromMedia';
 
 interface Tool {
   type: ElementType;
@@ -114,10 +114,11 @@ export function Toolbar({ boardId }: { boardId: string }) {
       return;
     }
     if (type === 'link') {
-      const url = window.prompt('Link URL', 'https://');
-      if (url && URL_RE.test(url.trim())) {
-        createLinkElement(boardId, url.trim(), world);
-      }
+      const input = window.prompt('Link URL', 'https://');
+      if (input === null) return;
+      const url = normalizeUrl(input);
+      if (url) createLinkElement(boardId, url, world);
+      else if (input.trim()) window.alert('That doesn’t look like a valid web link.');
       return;
     }
     if (type === 'boardLink') {
@@ -246,12 +247,21 @@ export function Toolbar({ boardId }: { boardId: string }) {
         onChange={(e) => {
           const files = [...(e.target.files ?? [])];
           const base = pendingImageWorld ?? { x: 200, y: 200 };
-          files.forEach((f, i) => {
-            void createImageElement(boardId, f, f.name, {
-              x: base.x + i * 24,
-              y: base.y + i * 24,
-            });
-          });
+          void (async () => {
+            for (const [i, f] of files.entries()) {
+              try {
+                await createImageElement(boardId, f, f.name, {
+                  x: base.x + i * 24,
+                  y: base.y + i * 24,
+                });
+              } catch (err) {
+                window.alert(
+                  err instanceof Error ? err.message : 'Could not add image.',
+                );
+                break;
+              }
+            }
+          })();
           e.target.value = '';
           setPendingImageWorld(null);
         }}

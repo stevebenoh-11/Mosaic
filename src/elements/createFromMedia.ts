@@ -47,6 +47,25 @@ export async function createImageElement(
 
 export const URL_RE = /^https?:\/\/[^\s]+$/i;
 
+/**
+ * Coerce user input into a safe http(s) URL, or return null if it can't be a
+ * URL. Bare hosts like "example.com" get an https:// prefix so the Link tool
+ * doesn't silently reject them.
+ */
+export function normalizeUrl(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const candidate = /^https?:\/\//i.test(t) ? t : `https://${t}`;
+  try {
+    const u = new URL(candidate);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    if (!u.hostname.includes('.')) return null; // reject "https://foo"
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function createLinkElement(
   boardId: string,
   url: string,

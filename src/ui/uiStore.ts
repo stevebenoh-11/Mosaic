@@ -1,7 +1,37 @@
 import { create } from 'zustand';
 import type { Element, ElementType } from '@/db/types';
 
+export type Theme = 'light' | 'dark';
+
+const THEME_KEY = 'mosaic:theme';
+
+function readTheme(): Theme {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {
+    /* localStorage blocked (private mode) — fall through to system preference */
+  }
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches
+  ) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+/** Reflect the theme onto <html> so the CSS variable overrides take effect. */
+export function applyTheme(theme: Theme): void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+  }
+}
+
 interface UiState {
+  theme: Theme;
+  setTheme(theme: Theme): void;
+  toggleTheme(): void;
   paletteOpen: boolean;
   setPaletteOpen(open: boolean): void;
   /** Mobile drawer state for the board sidebar. */
@@ -34,7 +64,26 @@ interface UiState {
   setDrawMode(patch: Partial<UiState['drawMode']>): void;
 }
 
-export const useUiStore = create<UiState>((set) => ({
+function persistTheme(theme: Theme): void {
+  applyTheme(theme);
+  try {
+    localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* ignore: theme just won't persist across reloads */
+  }
+}
+
+export const useUiStore = create<UiState>((set, get) => ({
+  theme: readTheme(),
+  setTheme: (theme) => {
+    persistTheme(theme);
+    set({ theme });
+  },
+  toggleTheme: () => {
+    const theme = get().theme === 'dark' ? 'light' : 'dark';
+    persistTheme(theme);
+    set({ theme });
+  },
   paletteOpen: false,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   sidebarOpen: false,

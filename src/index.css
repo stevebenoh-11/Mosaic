@@ -17,6 +17,30 @@
     0 8px 24px rgb(45 42 38 / 0.16), 0 2px 6px rgb(45 42 38 / 0.08);
 }
 
+/*
+ * Dark theme: override the theme custom properties. Tailwind v4 utilities
+ * reference these via var(), so redefining them under .dark recolors the whole
+ * app. The class is toggled on <html> (see ui/uiStore.ts → applyTheme).
+ */
+.dark {
+  --color-canvas: #1a1917;
+  --color-grid-dot: #322f2a;
+  --color-accent: #8b7cf0;
+  --color-accent-soft: #2c2748;
+  --color-card: #252320;
+  --color-card-border: #3a3833;
+  --color-ink: #ece9e3;
+  --color-ink-soft: #9c978d;
+  --color-panel: #201e1b;
+  --color-panel-border: #332f29;
+
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 0.4), 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-card-drag:
+    0 8px 24px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.4);
+
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {

@@ -62,9 +62,39 @@ function CommentEditor({ element }: { element: Element }) {
     },
   });
 
-  useEffect(() => () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-  }, []);
+  // Flush a pending debounced edit on unmount so a comment closed within the
+  // 300ms debounce window doesn't lose its last keystrokes (matches NoteCard).
+  useEffect(() => {
+    return () => {
+      if (!debounceRef.current) return;
+      clearTimeout(debounceRef.current);
+      if (editor && !editor.isDestroyed) {
+        const doc = editor.getJSON() as TipTapDoc;
+        const before = lastCommitted.current;
+        if (
+          JSON.stringify((before.content as CommentContentEx).doc) !==
+          JSON.stringify(doc)
+        ) {
+          execute({
+            label: 'Edit comment',
+            coalesceKey: `edit:${element.id}`,
+            changes: [
+              {
+                entity: 'element',
+                id: element.id,
+                before,
+                after: {
+                  ...before,
+                  content: { ...(before.content as CommentContentEx), doc },
+                },
+              },
+            ],
+          });
+        }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
 
   if (!editor) return null;
   return <EditorContent editor={editor} className="note-prose text-sm" />;
