@@ -1,13 +1,24 @@
 import { Check, Eraser } from 'lucide-react';
 import { useUiStore } from './uiStore';
 
-const COLORS = ['#2D2A26', '#6C5CE7', '#E0533D', '#2E9E63', '#E8A33D', '#3D7BE8'];
+const COLORS = [
+  '#2D2A26', '#636E72', '#FFFFFF',
+  '#E74C3C', '#E67E22', '#F1C40F',
+  '#2ECC71', '#1ABC9C', '#3498DB',
+  '#6C5CE7', '#9B59B6', '#E84393',
+];
 const WIDTHS = [2, 4, 8];
+const RAINBOW =
+  'conic-gradient(from 90deg,#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)';
 
 export function DrawBar() {
   const drawMode = useUiStore((s) => s.drawMode);
   const setDrawMode = useUiStore((s) => s.setDrawMode);
   if (!drawMode.active) return null;
+
+  const customActive =
+    !drawMode.eraser &&
+    !COLORS.some((c) => c.toLowerCase() === drawMode.color.toLowerCase());
 
   return (
     <div
@@ -17,20 +28,37 @@ export function DrawBar() {
       role="toolbar"
       aria-label="Drawing tools"
     >
-      <div className="flex items-center gap-1">
+      <div className="flex max-w-[212px] flex-wrap items-center gap-1">
         {COLORS.map((c) => (
           <button
             key={c}
             aria-label={`Pen color ${c}`}
             onClick={() => setDrawMode({ color: c, eraser: false })}
             className={`h-5 w-5 rounded-full border ${
-              drawMode.color === c && !drawMode.eraser
+              drawMode.color.toLowerCase() === c.toLowerCase() && !drawMode.eraser
                 ? 'ring-2 ring-accent ring-offset-1'
                 : 'border-card-border'
             }`}
             style={{ background: c }}
           />
         ))}
+        {/* Custom colour: shows a rainbow until a non-preset colour is chosen. */}
+        <label
+          title="Custom color"
+          aria-label="Custom pen color"
+          className={`relative h-5 w-5 cursor-pointer overflow-hidden rounded-full border ${
+            customActive ? 'ring-2 ring-accent ring-offset-1' : 'border-card-border'
+          }`}
+          style={{ background: customActive ? drawMode.color : RAINBOW }}
+        >
+          <input
+            type="color"
+            aria-label="Pick custom pen color"
+            value={drawMode.color}
+            onChange={(e) => setDrawMode({ color: e.target.value, eraser: false })}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+          />
+        </label>
       </div>
       <span className="h-5 w-px bg-card-border" />
       <div className="flex items-center gap-1">
