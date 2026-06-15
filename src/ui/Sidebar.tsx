@@ -130,7 +130,8 @@ function BoardNode({
               aria-label={`Delete board ${board.title || 'Untitled board'}`}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={() => void remove()}
-              className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-ink-soft opacity-0 hover:text-ink group-hover/row:opacity-100"
+              // Always visible on touch (no hover); hover-reveal on desktop.
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1.5 text-ink-soft opacity-100 hover:text-ink sm:opacity-0 sm:group-hover/row:opacity-100"
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -180,7 +181,7 @@ export function Sidebar() {
             onClick={() => setOpen(false)}
             aria-hidden
           />
-          <aside className="absolute left-0 top-0 h-full w-64 border-r border-panel-border bg-panel shadow-card-drag">
+          <aside className="safe-area absolute left-0 top-0 h-full w-64 border-r border-panel-border bg-panel shadow-card-drag">
             <SidebarContent />
           </aside>
         </div>

@@ -12,6 +12,8 @@
     "electron:installer": "tsc -b && vite build --base=./ && electron-builder --win",
     "electron:build": "tsc -b && vite build --base=./ && electron-packager . Mosaic --platform=win32 --arch=x64 --out=dist-electron --overwrite --ignore=\"^/(?!dist($|/)|main\\.cjs$|preload\\.cjs$|package\\.json$)\" && powershell -Command \"Compress-Archive -Path dist-electron/Mosaic-win32-x64/* -DestinationPath dist-electron/Mosaic-portable.zip -Force\"",
     "build": "tsc -b && vite build",
+    "android:sync": "npm run build && cap sync android",
+    "apk": "npm run build && cap sync android && cd android && gradlew assembleDebug",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,6 +21,8 @@
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.6",
+    "@capacitor/core": "^7.6.6",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -41,6 +45,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.6.6",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^25.9.3",

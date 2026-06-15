@@ -18,6 +18,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
+import { Trash2 } from 'lucide-react';
 import { useStore } from '@/store';
 import { useUiStore, isTypingTarget } from '@/ui/uiStore';
 import type { Element, LineContent, LineEndpoint } from '@/db/types';
@@ -1323,6 +1324,20 @@ export function CanvasView({ boardId }: { boardId: string }) {
     [boardId, execute, maxZ, setEditing, setSelection, toWorld],
   );
 
+  // Delete the current selection (with dependent lines/comments/column kids).
+  // Used by the keyboard handler and the mobile trash button.
+  const deleteSelected = useCallback(() => {
+    const state = useStore.getState();
+    if (state.selection.length === 0) return;
+    const selected = state.selection
+      .map((id) => state.elements[id])
+      .filter((el): el is Element => !!el);
+    if (selected.length === 0) return;
+    execute(deleteElementsCmd(withDependents(state.elements, boardId, selected)));
+    setSelection([]);
+    setOpenCommentId(null);
+  }, [boardId, execute, setSelection]);
+
   // ----- search-result flash: center + highlight the element -----
 
   const flashElementId = useUiStore((s) => s.flashElementId);
@@ -1698,6 +1713,19 @@ export function CanvasView({ boardId }: { boardId: string }) {
               </p>
             </div>
           </div>
+        )}
+
+        {/* Mobile: delete the selection (no keyboard available in the APK). */}
+        {selection.length > 0 && (
+          <button
+            aria-label="Delete selected"
+            title="Delete selected"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={deleteSelected}
+            className="absolute bottom-20 left-3 z-40 flex h-12 w-12 items-center justify-center rounded-full border border-card-border bg-card text-red-600 shadow-card-drag active:scale-95 sm:hidden"
+          >
+            <Trash2 className="h-5 w-5" />
+          </button>
         )}
 
         <DrawBar />

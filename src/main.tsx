@@ -11,9 +11,12 @@ import './index.css';
 // Apply the saved theme before first paint to avoid a light-mode flash.
 applyTheme(useUiStore.getState().theme);
 
-// No service worker under file:// (packaged Electron) — registration would
-// reject and the app runs fully offline there anyway.
-if (window.location.protocol !== 'file:') {
+// Skip the service worker in packaged shells (Electron file:// and the
+// Capacitor Android WebView): the app is already local there, and the SW only
+// risks stale-cache/reload issues. It stays enabled for the web/PWA build.
+const isNativeShell =
+  window.location.protocol === 'file:' || 'Capacitor' in window;
+if (!isNativeShell) {
   try {
     registerSW({ immediate: true });
   } catch (e) {
@@ -89,9 +92,10 @@ window.__mosaicSeedStress = async (count = 1500) => {
   return boardId;
 };
 
-// Packaged Electron loads the app from file://, where path-based routing
-// can't work — fall back to hash-based routing there.
-const Router = window.location.protocol === 'file:' ? HashRouter : BrowserRouter;
+// Packaged shells load the app locally where path-based routing is brittle
+// (Electron file://, Capacitor WebView) — use hash routing there, real paths
+// on the web.
+const Router = isNativeShell ? HashRouter : BrowserRouter;
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

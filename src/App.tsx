@@ -123,7 +123,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="safe-area flex h-full">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
