@@ -43,6 +43,9 @@ interface UiState {
   /** Element to flash-highlight + center after search navigation. */
   flashElementId: string | null;
   setFlashElementId(id: string | null): void;
+  /** A freshly-created comment to open for editing (consumed by the canvas). */
+  pendingCommentOpen: string | null;
+  setPendingCommentOpen(id: string | null): void;
   shortcutsOpen: boolean;
   setShortcutsOpen(open: boolean): void;
   /** Tool being dragged from the toolbar (ghost preview follows pointer). */
@@ -92,6 +95,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setClipboard: (clipboard) => set({ clipboard }),
   flashElementId: null,
   setFlashElementId: (flashElementId) => set({ flashElementId }),
+  pendingCommentOpen: null,
+  setPendingCommentOpen: (pendingCommentOpen) => set({ pendingCommentOpen }),
   shortcutsOpen: false,
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   draggingTool: null,

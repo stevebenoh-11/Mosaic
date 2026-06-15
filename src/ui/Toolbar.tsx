@@ -189,6 +189,10 @@ export function Toolbar({ boardId }: { boardId: string }) {
     if (type === 'note' || type === 'title' || type === 'column') {
       state.setEditing(el.id);
     }
+    if (type === 'comment') {
+      // Open the new comment so the user can type immediately.
+      useUiStore.getState().setPendingCommentOpen(el.id);
+    }
   }
 
   function createAtCenter(type: ElementType) {

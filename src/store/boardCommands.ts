@@ -1,6 +1,6 @@
 import { db } from '@/db/schema';
 import { newId } from '@/db/ids';
-import type { Board, Element, LineContent } from '@/db/types';
+import type { Board, BoardLinkContent, Element, LineContent } from '@/db/types';
 import type { Change, Command } from './commands';
 
 export function renameBoardCmd(board: Board, title: string): Command {
@@ -61,11 +61,26 @@ export async function buildDeleteBoardCmd(
   boards: Record<string, Board>,
 ): Promise<Command> {
   const elements = await db.elements.where('boardId').equals(board.id).toArray();
+  const ownIds = new Set(elements.map((el) => el.id));
+  // Board-link cards on OTHER boards that point here would become dangling
+  // "Missing board" cards — delete them too.
+  const orphanLinks = (
+    await db.elements
+      .filter(
+        (el) =>
+          el.type === 'boardLink' &&
+          (el.content as BoardLinkContent).boardId === board.id,
+      )
+      .toArray()
+  ).filter((el) => !ownIds.has(el.id));
   const children = Object.values(boards).filter(
     (b) => b.parentBoardId === board.id,
   );
   const changes: Change[] = [
     ...elements.map(
+      (el): Change => ({ entity: 'element', id: el.id, before: el, after: null }),
+    ),
+    ...orphanLinks.map(
       (el): Change => ({ entity: 'element', id: el.id, before: el, after: null }),
     ),
     ...children.map(

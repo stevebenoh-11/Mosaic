@@ -36,8 +36,30 @@ const EXTENSIONS = noteExtensions('Write a comment…');
 function CommentEditor({ element }: { element: Element }) {
   const execute = useStore((s) => s.execute);
   const content = element.content as CommentContentEx;
-  const lastCommitted = useRef(element);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Commit the new doc onto the LATEST element from the store, not a snapshot
+  // taken at mount — otherwise toggling "resolved" while the editor is open
+  // gets clobbered back on the next keystroke. Returns true if it committed.
+  function commitDoc(doc: TipTapDoc): boolean {
+    const before = useStore.getState().elements[element.id];
+    if (!before) return false;
+    const bc = before.content as CommentContentEx;
+    if (JSON.stringify(bc.doc) === JSON.stringify(doc)) return false;
+    execute({
+      label: 'Edit comment',
+      coalesceKey: `edit:${element.id}`,
+      changes: [
+        {
+          entity: 'element',
+          id: element.id,
+          before,
+          after: { ...before, content: { ...bc, doc } },
+        },
+      ],
+    });
+    return true;
+  }
 
   const editor = useEditor({
     extensions: EXTENSIONS,
@@ -46,18 +68,7 @@ function CommentEditor({ element }: { element: Element }) {
     onUpdate({ editor }) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        const doc = editor.getJSON() as TipTapDoc;
-        const before = lastCommitted.current;
-        const after: Element = {
-          ...before,
-          content: { ...(before.content as CommentContentEx), doc },
-        };
-        lastCommitted.current = after;
-        execute({
-          label: 'Edit comment',
-          coalesceKey: `edit:${element.id}`,
-          changes: [{ entity: 'element', id: element.id, before, after }],
-        });
+        commitDoc(editor.getJSON() as TipTapDoc);
       }, 300);
     },
   });
@@ -69,28 +80,7 @@ function CommentEditor({ element }: { element: Element }) {
       if (!debounceRef.current) return;
       clearTimeout(debounceRef.current);
       if (editor && !editor.isDestroyed) {
-        const doc = editor.getJSON() as TipTapDoc;
-        const before = lastCommitted.current;
-        if (
-          JSON.stringify((before.content as CommentContentEx).doc) !==
-          JSON.stringify(doc)
-        ) {
-          execute({
-            label: 'Edit comment',
-            coalesceKey: `edit:${element.id}`,
-            changes: [
-              {
-                entity: 'element',
-                id: element.id,
-                before,
-                after: {
-                  ...before,
-                  content: { ...(before.content as CommentContentEx), doc },
-                },
-              },
-            ],
-          });
-        }
+        commitDoc(editor.getJSON() as TipTapDoc);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1347,6 +1347,18 @@ export function CanvasView({ boardId }: { boardId: string }) {
     return () => clearTimeout(timer);
   }, [flashElementId, boardId, elements[flashElementId ?? ''] !== undefined, setSelection, setViewport]);
 
+  // Open a freshly-created comment for editing (signalled from the toolbar).
+  const pendingCommentOpen = useUiStore((s) => s.pendingCommentOpen);
+  useEffect(() => {
+    if (!pendingCommentOpen) return;
+    const el = useStore.getState().elements[pendingCommentOpen];
+    if (el && el.boardId === boardId) {
+      setOpenCommentId(pendingCommentOpen);
+      setSelection([pendingCommentOpen]);
+    }
+    useUiStore.getState().setPendingCommentOpen(null);
+  }, [pendingCommentOpen, boardId, setSelection]);
+
   // ----- dnd-kit: sorting inside columns + drag out to canvas -----
 
   const sensors = useSensors(
