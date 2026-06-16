@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -32,6 +33,15 @@ export function ActivityPanel() {
   const markAllSeen = useActivityStore((s) => s.markAllSeen);
   const account = useStore.getState().deviceId;
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, setOpen]);
 
   if (!open) return null;
 

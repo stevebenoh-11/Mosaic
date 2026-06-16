@@ -38,6 +38,15 @@ export function QuickNotesPanel() {
     if (open) void refresh();
   }, [open, refresh]);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, setOpen]);
+
   if (!open) return null;
 
   const destinations = Object.values(boards)
