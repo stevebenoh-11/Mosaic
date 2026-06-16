@@ -1,5 +1,6 @@
-import { Check, Loader2, Menu, Moon, Sun } from 'lucide-react';
+import { Bell, Check, Loader2, Menu, Moon, Sun } from 'lucide-react';
 import { useStore } from '@/store';
+import { useActivityStore } from '@/store/activityStore';
 import { useUiStore } from './uiStore';
 import { Breadcrumbs } from './Breadcrumbs';
 import { AccountMenu } from './AccountMenu';
@@ -23,6 +24,28 @@ function SaveIndicator() {
         </>
       )}
     </span>
+  );
+}
+
+function ActivityBell() {
+  const setActivityOpen = useUiStore((s) => s.setActivityOpen);
+  const unseen = useActivityStore(
+    (s) => s.entries.filter((e) => e.at > s.lastSeenAt).length,
+  );
+  return (
+    <button
+      aria-label={`Activity${unseen > 0 ? ` (${unseen} new)` : ''}`}
+      title="Activity"
+      onClick={() => setActivityOpen(true)}
+      className="relative rounded p-1.5 text-ink-soft hover:bg-panel-border/60 hover:text-ink"
+    >
+      <Bell className="h-4 w-4" />
+      {unseen > 0 && (
+        <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-white">
+          {unseen > 9 ? '9+' : unseen}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -57,6 +80,7 @@ export function TopBar() {
       <SyncStatusPill />
       <div className="flex-1" />
       <SaveIndicator />
+      <ActivityBell />
       <ThemeToggle />
       <ExportMenu />
       <AccountMenu />

@@ -5,6 +5,7 @@ import type { Board, Element } from '@/db/types';
 import { invertCommand, type Change, type Command } from './commands';
 import { History } from './history';
 import { Persister } from './persister';
+import { logCommand } from './activityStore';
 
 export interface Viewport {
   x: number;
@@ -147,6 +148,7 @@ export const useStore = create<AppState>((set, get) => {
       applyChanges(cmd.changes);
       history.record(cmd);
       syncHistoryFlags();
+      logCommand(cmd, get().boards);
     },
 
     undo() {

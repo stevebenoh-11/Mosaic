@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   CheckSquare,
   Columns2,
+  FileText,
   Image as ImageIcon,
   Link2,
   MessageSquare,
@@ -31,12 +32,13 @@ interface Tool {
 
 const TOOLS: Tool[] = [
   { type: 'note', label: 'Note', icon: StickyNote, enabled: true },
-  { type: 'title', label: 'Title', icon: Type, enabled: true },
+  { type: 'document', label: 'Document', icon: FileText, enabled: true },
+  { type: 'title', label: 'Heading', icon: Type, enabled: true },
   { type: 'image', label: 'Image', icon: ImageIcon, enabled: true },
   { type: 'link', label: 'Link', icon: Link2, enabled: true },
   { type: 'todo', label: 'To-do', icon: CheckSquare, enabled: true },
   { type: 'column', label: 'Column', icon: Columns2, enabled: true },
-  { type: 'swatch', label: 'Swatch', icon: Palette, enabled: true },
+  { type: 'swatch', label: 'Color', icon: Palette, enabled: true },
   { type: 'line', label: 'Line', icon: Minus, enabled: true, hint: 'Tip: drag from a selected card’s edge dots' },
   { type: 'drawing', label: 'Draw', icon: PenLine, enabled: true, hint: 'Draw freehand on the canvas' },
   { type: 'boardLink', label: 'Board', icon: Square, enabled: true },
@@ -188,6 +190,10 @@ export function Toolbar({ boardId }: { boardId: string }) {
     state.setSelection([el.id]);
     if (type === 'note' || type === 'title' || type === 'column') {
       state.setEditing(el.id);
+    }
+    if (type === 'document') {
+      // Open the expanded editor so the user can start writing immediately.
+      useUiStore.getState().setOpenDocumentId(el.id);
     }
     if (type === 'comment') {
       // Open the new comment so the user can type immediately.

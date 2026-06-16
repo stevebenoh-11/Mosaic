@@ -21,18 +21,19 @@ import {
 import { Trash2 } from 'lucide-react';
 import { useStore } from '@/store';
 import { useUiStore, isTypingTarget } from '@/ui/uiStore';
-import type { Element, LineContent, LineEndpoint } from '@/db/types';
+import type { Element, LineContent, LineEndpoint, LineMarker } from '@/db/types';
 import {
   buildElement,
   deleteElementsCmd,
   duplicateElementsCmd,
   updateElementsCmd,
+  withDependents,
   zOrderCmd,
 } from '@/store/elementCommands';
 import { ElementView, AUTO_HEIGHT } from '@/elements/ElementView';
 import { ElementBody, COLUMNABLE } from '@/elements/ElementBody';
 import { columnChildren } from '@/elements/column/ColumnCard';
-import { LineLayer } from '@/elements/line/LineLayer';
+import { LineLayer, effectiveMarkers } from '@/elements/line/LineLayer';
 import { anchorPoint, linePath, type ResolvedEnd, type Side } from '@/elements/line/geometry';
 import { CommentPin } from '@/elements/comment/CommentPin';
 import { createImageElement, createLinkElement, URL_RE } from '@/elements/createFromMedia';
@@ -53,6 +54,7 @@ import { computeSnap, type SnapGuide } from './snapping';
 import { distanceToPath, simplifyPoints, strokeBounds } from './drawing';
 import { ZoomControls } from './ZoomControls';
 import { DrawBar } from '@/ui/DrawBar';
+import { SelectionToolbar } from '@/ui/SelectionToolbar';
 import type { DrawingContent } from '@/db/types';
 
 const DRAG_THRESHOLD_PX = 4;
@@ -107,44 +109,6 @@ type Interaction =
   | { kind: 'draw'; points: number[] }
   | { kind: 'erase'; gesture: string }
   | { kind: 'pinch' };
-
-/** Expand a deletion set with lines/comments that reference the victims. */
-function withDependents(
-  elements: Record<string, Element>,
-  boardId: string,
-  targets: Element[],
-): Element[] {
-  const ids = new Set(targets.map((e) => e.id));
-  const all = [...targets];
-  // Column children go with their column.
-  for (const el of Object.values(elements)) {
-    if (el.boardId !== boardId || ids.has(el.id)) continue;
-    if (el.parentColumnId && ids.has(el.parentColumnId)) {
-      ids.add(el.id);
-      all.push(el);
-    }
-  }
-  for (const el of Object.values(elements)) {
-    if (el.boardId !== boardId || ids.has(el.id)) continue;
-    if (el.type === 'line') {
-      const c = el.content as LineContent;
-      const refs = [c.from, c.to].some(
-        (end) => 'elementId' in end && ids.has(end.elementId),
-      );
-      if (refs) {
-        ids.add(el.id);
-        all.push(el);
-      }
-    } else if (el.type === 'comment') {
-      const c = el.content as { targetElementId?: string };
-      if (c.targetElementId && ids.has(c.targetElementId)) {
-        ids.add(el.id);
-        all.push(el);
-      }
-    }
-  }
-  return all;
-}
 
 export function CanvasView({ boardId }: { boardId: string }) {
   const elements = useStore((s) => s.elements);
@@ -526,9 +490,14 @@ export function CanvasView({ boardId }: { boardId: string }) {
       }
       if (e.key === 'Enter' && state.selection.length === 1 && !state.editingElementId) {
         const el = state.elements[state.selection[0]!];
-        if (el && ['note', 'title', 'swatch', 'column'].includes(el.type)) {
-          e.preventDefault();
-          setEditing(el.id);
+        if (el && !el.style.locked) {
+          if (el.type === 'document') {
+            e.preventDefault();
+            useUiStore.getState().setOpenDocumentId(el.id);
+          } else if (['note', 'title', 'swatch', 'column'].includes(el.type)) {
+            e.preventDefault();
+            setEditing(el.id);
+          }
         }
         return;
       }
@@ -616,9 +585,15 @@ export function CanvasView({ boardId }: { boardId: string }) {
       const snapshots = new Map<string, Element>();
       for (const id of ids) {
         const el = state.elements[id];
-        if (el && el.type !== 'line') snapshots.set(id, structuredClone(el));
+        // Locked elements stay selected but don't move with the drag.
+        if (el && el.type !== 'line' && !el.style.locked) {
+          snapshots.set(id, structuredClone(el));
+        }
       }
-      const isTouch = e.pointerType === 'touch';
+      // Touch drags a card immediately (like the mouse): pressing a card and
+      // moving past the threshold moves it. Canvas panning stays available on
+      // empty space (one finger) and via two fingers anywhere — so a card is
+      // never "stuck" behind a long-press gate. (Milanote-style direct drag.)
       const interaction: Extract<Interaction, { kind: 'drag' }> = {
         kind: 'drag',
         ids,
@@ -630,18 +605,9 @@ export function CanvasView({ boardId }: { boardId: string }) {
         duplicated: false,
         soloCandidate,
         toggleCandidate,
-        touchPending: isTouch,
+        touchPending: false,
         longPressTimer: null,
       };
-      if (isTouch) {
-        interaction.longPressTimer = window.setTimeout(() => {
-          const cur = interactionRef.current;
-          if (cur.kind === 'drag' && cur.touchPending) {
-            cur.touchPending = false;
-            navigator.vibrate?.(10);
-          }
-        }, 300);
-      }
       interactionRef.current = interaction;
     },
     [setSelection, toWorld],
@@ -668,7 +634,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
   const onResizeHandleDown = useCallback(
     (e: ReactPointerEvent, element: Element, handle: Handle) => {
       e.stopPropagation();
-      if (e.button !== 0) return;
+      if (e.button !== 0 || element.style.locked) return;
       containerRef.current?.setPointerCapture(e.pointerId);
       pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
       interactionRef.current = {
@@ -700,7 +666,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
   const onLineEndpointDown = useCallback(
     (e: ReactPointerEvent, line: Element, end: 'from' | 'to') => {
       e.stopPropagation();
-      if (e.button !== 0) return;
+      if (e.button !== 0 || line.style.locked) return;
       containerRef.current?.setPointerCapture(e.pointerId);
       interactionRef.current = {
         kind: 'line-endpoint',
@@ -1149,6 +1115,9 @@ export function CanvasView({ boardId }: { boardId: string }) {
       if (interaction.kind === 'line-draw') {
         if (!interaction.moved) return;
         const state = useStore.getState();
+        const fromEl = state.elements[interaction.fromId];
+        // Source card was removed mid-drag (undo/delete) — abort, don't orphan.
+        if (!fromEl) return;
         const world = toWorld({ x: e.clientX, y: e.clientY });
         const target = topElementAt(
           state.elements,
@@ -1163,10 +1132,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
           dashed: false,
           arrowEnd: true,
         };
-        const fromEl = state.elements[interaction.fromId];
-        const a = fromEl
-          ? anchorPoint(fromEl, interaction.fromSide)
-          : world;
+        const a = anchorPoint(fromEl, interaction.fromSide);
         const el = buildElement(boardId, 'line', a.x, a.y, maxZ + 1, {
           w: 0,
           h: 0,
@@ -1183,6 +1149,8 @@ export function CanvasView({ boardId }: { boardId: string }) {
       if (interaction.kind === 'line-endpoint') {
         if (!interaction.moved) return;
         const state = useStore.getState();
+        // Line was removed mid-drag — don't resurrect it from the snapshot.
+        if (!state.elements[interaction.lineId]) return;
         const world = toWorld({ x: e.clientX, y: e.clientY });
         const before = interaction.snapshot;
         // Snap onto a card under the cursor, otherwise drop as a free point.
@@ -1520,6 +1488,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
       : undefined;
 
   const handlesFor = (el: Element): Handle[] => {
+    if (el.style.locked) return [];
     if (el.type === 'image') return ['nw', 'ne', 'se', 'sw'];
     if (el.type === 'drawing') return []; // drawings move but don't resize
     if (AUTO_HEIGHT.has(el.type)) return ['e', 'w'];
@@ -1636,7 +1605,7 @@ export function CanvasView({ boardId }: { boardId: string }) {
           )}
 
           {/* draggable endpoints on the selected line */}
-          {singleLine && (
+          {singleLine && !singleLine.style.locked && (
             <LineEndpoints
               line={singleLine}
               elements={elements}
@@ -1702,6 +1671,9 @@ export function CanvasView({ boardId }: { boardId: string }) {
         {singleLine && (
           <LinePropertyBar line={singleLine} elements={elements} viewport={viewport} />
         )}
+
+        {/* contextual selection toolbar (cards / multi-select) */}
+        <SelectionToolbar viewport={viewport} />
 
         {boardElements.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -1845,6 +1817,7 @@ function LinePropertyBar({
 }) {
   const execute = useStore((s) => s.execute);
   const setSelection = useStore((s) => s.setSelection);
+  const [colorOpen, setColorOpen] = useState(false);
   const c = line.content as LineContent;
 
   // Position above the line's midpoint (screen space).
@@ -1861,16 +1834,35 @@ function LinePropertyBar({
   // its default position (mid.y - 48) would render the bar off-canvas.
   const barTop = mid.y - 48 < 8 ? mid.y + 24 : mid.y - 48;
 
-  function toggle(prop: 'curve' | 'dashed' | 'arrowEnd') {
-    const state = useStore.getState();
-    const before = state.elements[line.id];
+  function setContent(patch: Partial<LineContent>) {
+    const before = useStore.getState().elements[line.id];
     if (!before) return;
     const bc = before.content as LineContent;
-    const after: Element = { ...before, content: { ...bc, [prop]: !bc[prop] } };
     execute({
       label: 'Edit line',
-      changes: [{ entity: 'element', id: line.id, before, after }],
+      changes: [
+        { entity: 'element', id: line.id, before, after: { ...before, content: { ...bc, ...patch } } },
+      ],
     });
+  }
+
+  function toggle(prop: 'curve' | 'dashed') {
+    const bc = useStore.getState().elements[line.id]?.content as LineContent | undefined;
+    if (bc) setContent({ [prop]: !bc[prop] } as Partial<LineContent>);
+  }
+
+  function cycleMarker(which: 'startMarker' | 'endMarker') {
+    const bc = useStore.getState().elements[line.id]?.content as LineContent | undefined;
+    if (!bc) return;
+    const m = effectiveMarkers(bc);
+    const cur = which === 'startMarker' ? m.start : m.end;
+    const next = MARKER_CYCLE[(MARKER_CYCLE.indexOf(cur) + 1) % MARKER_CYCLE.length]!;
+    setContent({ [which]: next } as Partial<LineContent>);
+  }
+
+  function editLabel() {
+    const v = window.prompt('Line label', c.label ?? '');
+    if (v !== null) setContent({ label: v.trim() || undefined });
   }
 
   function remove() {
@@ -1878,6 +1870,7 @@ function LinePropertyBar({
     setSelection([]);
   }
 
+  const markers = effectiveMarkers(c);
   const btn = (active: boolean) =>
     `rounded p-1.5 text-xs ${active ? 'bg-accent-soft text-accent' : 'text-ink-soft hover:bg-panel-border/60 hover:text-ink'}`;
 
@@ -1898,23 +1891,83 @@ function LinePropertyBar({
           <path d="M1 8 H 15" stroke="currentColor" strokeWidth="1.8" strokeDasharray="3 2.5" />
         </svg>
       </button>
-      <button aria-label="Toggle arrowhead" title="Arrowhead" className={btn(c.arrowEnd)} onClick={() => toggle('arrowEnd')}>
+      <span className="mx-0.5 h-4 w-px bg-card-border" />
+      <button
+        aria-label="Start marker"
+        title={`Start cap: ${markers.start}`}
+        className={btn(markers.start !== 'none')}
+        onClick={() => cycleMarker('startMarker')}
+      >
+        <MarkerGlyph type={markers.start} flip />
+      </button>
+      <button
+        aria-label="End marker"
+        title={`End cap: ${markers.end}`}
+        className={btn(markers.end !== 'none')}
+        onClick={() => cycleMarker('endMarker')}
+      >
+        <MarkerGlyph type={markers.end} />
+      </button>
+      <div className="relative">
+        <button
+          aria-label="Line color"
+          title="Color"
+          className={btn(colorOpen)}
+          onClick={() => setColorOpen((v) => !v)}
+        >
+          <span
+            className="block h-3.5 w-3.5 rounded-full border border-card-border"
+            style={{ background: c.color ?? '#8a867e' }}
+          />
+        </button>
+        {colorOpen && (
+          <div className="absolute bottom-9 left-1/2 flex w-40 -translate-x-1/2 flex-wrap gap-1 rounded-lg border border-card-border bg-card p-1.5 shadow-card-drag">
+            {LINE_COLORS.map((hex) => (
+              <button
+                key={hex}
+                aria-label={`Line color ${hex}`}
+                title={hex}
+                onClick={() => {
+                  setContent({ color: hex });
+                  setColorOpen(false);
+                }}
+                className="h-5 w-5 rounded-full border border-card-border transition-transform hover:scale-110"
+                style={{ background: hex }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+      <button aria-label="Line label" title="Label" className={btn(!!c.label)} onClick={editLabel}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M1 8 H 13 M 9 4 L 13 8 L 9 12" stroke="currentColor" strokeWidth="1.8" fill="none" />
+          <path d="M2 4 H 14 M 2 8 H 11 M 2 12 H 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
       </button>
       <span className="mx-0.5 h-4 w-px bg-card-border" />
-      <button
-        aria-label="Delete line"
-        title="Delete"
-        className={btn(false)}
-        onClick={remove}
-      >
+      <button aria-label="Delete line" title="Delete" className={btn(false)} onClick={remove}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M3 4 H 13 M 6 4 V 2.5 H 10 V 4 M 5 4 L 5.7 13.5 H 10.3 L 11 4" stroke="currentColor" strokeWidth="1.4" fill="none" />
         </svg>
       </button>
     </div>
+  );
+}
+
+const MARKER_CYCLE: LineMarker[] = ['none', 'arrow', 'circle', 'square'];
+const LINE_COLORS = [
+  '#8a867e', '#2D2A26', '#E74C3C', '#E67E22',
+  '#F1C40F', '#2ECC71', '#3498DB', '#6C5CE7',
+];
+
+/** Small glyph showing a line's end-cap style in the property bar. */
+function MarkerGlyph({ type, flip }: { type: LineMarker; flip?: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={flip ? { transform: 'scaleX(-1)' } : undefined}>
+      <path d="M1 8 H 11" stroke="currentColor" strokeWidth="1.6" />
+      {type === 'arrow' && <path d="M9 4 L 13 8 L 9 12" stroke="currentColor" strokeWidth="1.6" fill="none" />}
+      {type === 'circle' && <circle cx={12} cy={8} r={2.6} fill="currentColor" />}
+      {type === 'square' && <rect x={9.5} y={5.5} width={5} height={5} fill="currentColor" />}
+    </svg>
   );
 }
 

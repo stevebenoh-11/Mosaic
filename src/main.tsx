@@ -22,6 +22,26 @@ if (!isNativeShell) {
   } catch (e) {
     console.warn('Service worker registration failed:', e);
   }
+} else if ('serviceWorker' in navigator) {
+  // A previous install may have left a precaching service worker that now
+  // serves a STALE bundle inside the WebView (so app updates appear to do
+  // nothing). Tear down any existing SW registration and its caches so the
+  // app always loads the freshly-bundled assets. Reload once if a SW was
+  // actually controlling this page.
+  navigator.serviceWorker
+    .getRegistrations()
+    .then(async (regs) => {
+      if (regs.length === 0) return;
+      await Promise.all(regs.map((r) => r.unregister()));
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      if (navigator.serviceWorker.controller) window.location.reload();
+    })
+    .catch(() => {
+      /* best-effort cleanup */
+    });
 }
 
 // Last-resort logging so background failures (sync, persistence) surface in

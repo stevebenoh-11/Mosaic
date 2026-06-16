@@ -1,9 +1,56 @@
 import { memo } from 'react';
 import { useStore } from '@/store';
-import type { Element, LineContent } from '@/db/types';
+import type { Element, LineContent, LineMarker } from '@/db/types';
 import { linePath } from './geometry';
 
 const STROKE = '#8a867e';
+
+/** Resolve effective markers, tolerating legacy `arrowEnd`-only lines. */
+export function effectiveMarkers(c: LineContent): { start: LineMarker; end: LineMarker } {
+  return {
+    start: c.startMarker ?? 'none',
+    end: c.endMarker ?? (c.arrowEnd ? 'arrow' : 'none'),
+  };
+}
+
+function MarkerDef({
+  id,
+  type,
+  color,
+}: {
+  id: string;
+  type: LineMarker;
+  color: string;
+}) {
+  if (type === 'none') return null;
+  const common = {
+    id,
+    viewBox: '0 0 10 10',
+    refY: 5,
+    markerWidth: 7,
+    markerHeight: 7,
+    orient: 'auto-start-reverse' as const,
+  };
+  if (type === 'arrow') {
+    return (
+      <marker {...common} refX={9}>
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
+      </marker>
+    );
+  }
+  if (type === 'circle') {
+    return (
+      <marker {...common} refX={5}>
+        <circle cx={5} cy={5} r={4} fill={color} />
+      </marker>
+    );
+  }
+  return (
+    <marker {...common} refX={5}>
+      <rect x={1} y={1} width={8} height={8} fill={color} />
+    </marker>
+  );
+}
 
 /**
  * SVG layer inside the world container. Lines re-route live because they
@@ -27,37 +74,20 @@ export const LineLayer = memo(function LineLayer({
       className="absolute left-0 top-0"
       style={{ width: 1, height: 1, overflow: 'visible' }}
     >
-      <defs>
-        <marker
-          id="arrow"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill={STROKE} />
-        </marker>
-        <marker
-          id="arrow-selected"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="7"
-          markerHeight="7"
-          orient="auto-start-reverse"
-        >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--color-accent)" />
-        </marker>
-      </defs>
       {lines.map((line) => {
         const c = line.content as LineContent;
         const geo = linePath(c, elements);
         if (!geo) return null;
         const selected = selection.includes(line.id);
+        const color = selected ? 'var(--color-accent)' : (c.color ?? STROKE);
+        const { start, end } = effectiveMarkers(c);
+        const mid = { x: (geo.from.x + geo.to.x) / 2, y: (geo.from.y + geo.to.y) / 2 };
         return (
           <g key={line.id}>
+            <defs>
+              <MarkerDef id={`mk-start-${line.id}`} type={start} color={color} />
+              <MarkerDef id={`mk-end-${line.id}`} type={end} color={color} />
+            </defs>
             {/* wide invisible stroke = generous hit area */}
             <path
               d={geo.d}
@@ -73,16 +103,29 @@ export const LineLayer = memo(function LineLayer({
             <path
               d={geo.d}
               fill="none"
-              stroke={selected ? 'var(--color-accent)' : STROKE}
+              stroke={color}
               strokeWidth={selected ? 2.5 : 2}
               strokeDasharray={c.dashed ? '6 5' : undefined}
-              markerEnd={
-                c.arrowEnd
-                  ? `url(#${selected ? 'arrow-selected' : 'arrow'})`
-                  : undefined
-              }
+              markerStart={start !== 'none' ? `url(#mk-start-${line.id})` : undefined}
+              markerEnd={end !== 'none' ? `url(#mk-end-${line.id})` : undefined}
               style={{ pointerEvents: 'none' }}
             />
+            {c.label && (
+              <text
+                x={mid.x}
+                y={mid.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={12}
+                fill={selected ? 'var(--color-accent)' : 'var(--color-ink)'}
+                stroke="var(--color-canvas)"
+                strokeWidth={4}
+                paintOrder="stroke"
+                style={{ pointerEvents: 'none', userSelect: 'none' }}
+              >
+                {c.label}
+              </text>
+            )}
           </g>
         );
       })}

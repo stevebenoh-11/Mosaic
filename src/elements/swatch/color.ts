@@ -1,4 +1,5 @@
 /** Minimal HSL <-> hex helpers for the swatch colour picker. */
+import type { ColorFormat } from '@/db/types';
 
 export interface Hsl {
   h: number; // 0..360
@@ -51,4 +52,36 @@ export function hexToHsl(hex: string): Hsl {
   const l = (max + min) / 2;
   const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
   return { h, s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  let clean = hex.replace('#', '').trim();
+  if (clean.length === 3) {
+    clean = clean.split('').map((c) => c + c).join('');
+  }
+  if (clean.length !== 6 || /[^0-9a-fA-F]/.test(clean)) return null;
+  return {
+    r: parseInt(clean.slice(0, 2), 16),
+    g: parseInt(clean.slice(2, 4), 16),
+    b: parseInt(clean.slice(4, 6), 16),
+  };
+}
+
+/** Render a hex colour in the requested display format ('off' = hidden). */
+export function formatColor(hex: string, format: ColorFormat = 'hex'): string {
+  switch (format) {
+    case 'off':
+      return '';
+    case 'rgb': {
+      const rgb = hexToRgb(hex);
+      return rgb ? `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})` : hex.toUpperCase();
+    }
+    case 'hsl': {
+      const { h, s, l } = hexToHsl(hex);
+      return `hsl(${h}, ${s}%, ${l}%)`;
+    }
+    case 'hex':
+    default:
+      return hex.toUpperCase();
+  }
 }

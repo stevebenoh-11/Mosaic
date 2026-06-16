@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Plus, Trash2 } from 'lucide-react';
+import { Inbox, LayoutGrid, Plus, Trash2 } from 'lucide-react';
 import { useStore } from '@/store';
+import { db, getMeta } from '@/db/schema';
 import { newId } from '@/db/ids';
 import type { Board } from '@/db/types';
 import {
@@ -154,6 +155,48 @@ function BoardNode({
         </ul>
       )}
     </li>
+  );
+}
+
+function QuickNotesButton() {
+  const boards = useStore((s) => s.boards);
+  const quickNotesOpen = useUiStore((s) => s.quickNotesOpen);
+  const setQuickNotesOpen = useUiStore((s) => s.setQuickNotesOpen);
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const id = await getMeta<string>('inboxBoardId');
+      if (!id) {
+        if (alive) setCount(0);
+        return;
+      }
+      const n = await db.elements.where('boardId').equals(id).count();
+      if (alive) setCount(n);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [boards, quickNotesOpen]);
+
+  return (
+    <button
+      onClick={() => {
+        setQuickNotesOpen(true);
+        useUiStore.getState().setSidebarOpen(false);
+      }}
+      className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm text-ink hover:bg-panel-border/60"
+    >
+      <span className="flex items-center gap-2">
+        <Inbox className="h-4 w-4 text-ink-soft" /> Quick notes
+      </span>
+      {count > 0 && (
+        <span className="rounded-full bg-panel-border px-1.5 text-[11px] text-ink-soft">
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -312,6 +355,18 @@ function SidebarContent() {
       <div className="flex items-center gap-2 px-4 py-4">
         <Logo className="h-6 w-6" />
         <span className="text-[15px] font-semibold tracking-tight">Mosaic</span>
+      </div>
+      <div className="flex flex-col gap-0.5 px-2 pb-2">
+        <button
+          onClick={() => {
+            navigate('/boards');
+            useUiStore.getState().setSidebarOpen(false);
+          }}
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-ink hover:bg-panel-border/60"
+        >
+          <LayoutGrid className="h-4 w-4 text-ink-soft" /> All boards
+        </button>
+        <QuickNotesButton />
       </div>
       <div className="flex items-center justify-between px-4 pb-1">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-soft">

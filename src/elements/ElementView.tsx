@@ -1,16 +1,21 @@
 import { memo, useEffect, useRef } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 import { useStore } from '@/store';
+import { useUiStore } from '@/ui/uiStore';
+import { updateStyleCmd } from '@/store/elementCommands';
 import type { BoardLinkContent, Element, LinkContent } from '@/db/types';
 import { ElementBody } from './ElementBody';
 
 /** Types whose height follows their content (measured, not dragged). */
-export const AUTO_HEIGHT = new Set(['note', 'title', 'todo', 'column']);
+export const AUTO_HEIGHT = new Set(['note', 'title', 'todo', 'column', 'document']);
 const EDITABLE = new Set(['note', 'title', 'swatch', 'column']);
 /** Types drawn without the white card chrome. */
 const CHROMELESS = new Set(['title', 'column', 'comment', 'drawing']);
 const CLIPPED = new Set(['image', 'link', 'swatch']);
+/** Types where a custom colour tints the card background vs. the text. */
+const TEXT_COLORED = new Set(['title']);
 
 interface Props {
   element: Element;
@@ -51,6 +56,26 @@ export const ElementView = memo(function ElementView({
   }, [autoHeight, element.id, updateEphemeral]);
 
   const isCard = !CHROMELESS.has(element.type);
+  const locked = !!element.style.locked;
+  const color = element.style.color;
+  const labels = element.style.labels ?? [];
+  const reactions = element.style.reactions ?? {};
+  const reactionEntries = Object.entries(reactions).filter(([, n]) => n > 0);
+
+  // Custom colour: tints the card background, or the text for headings.
+  const colorStyle: CSSProperties = {};
+  if (color) {
+    if (TEXT_COLORED.has(element.type)) colorStyle.color = color;
+    else if (isCard && element.type !== 'swatch') colorStyle.backgroundColor = color;
+  }
+
+  function addReaction(emoji: string) {
+    const current = useStore.getState().elements[element.id];
+    if (!current) return;
+    const next = { ...(current.style.reactions ?? {}) };
+    next[emoji] = (next[emoji] ?? 0) + 1;
+    useStore.getState().execute(updateStyleCmd('React', [current], { reactions: next }));
+  }
 
   return (
     <div
@@ -59,7 +84,12 @@ export const ElementView = memo(function ElementView({
       onPointerDown={(e) => onPointerDown(e, element)}
       onDoubleClick={(e) => {
         e.stopPropagation();
+        if (locked) return;
         if (EDITABLE.has(element.type)) setEditing(element.id);
+        // Documents open in an expanded editor rather than editing inline.
+        if (element.type === 'document') {
+          useUiStore.getState().setOpenDocumentId(element.id);
+        }
         // Pointer capture retargets dblclick to this wrapper, so board
         // navigation must live here rather than on the card body.
         if (element.type === 'boardLink') {
@@ -74,7 +104,7 @@ export const ElementView = memo(function ElementView({
         }
       }}
       className={[
-        'absolute',
+        'absolute transition-shadow',
         isCard ? 'rounded-md border bg-card shadow-card' : 'rounded-md',
         CLIPPED.has(element.type) ? 'overflow-hidden' : '',
         selected
@@ -84,7 +114,7 @@ export const ElementView = memo(function ElementView({
           : isCard
             ? 'border-card-border'
             : '',
-        editing ? 'cursor-text' : 'cursor-default',
+        editing ? 'cursor-text' : locked ? 'cursor-default' : 'cursor-default',
         flashing ? 'animate-pulse ring-4 ring-accent' : '',
       ].join(' ')}
       style={{
@@ -94,9 +124,50 @@ export const ElementView = memo(function ElementView({
         height: autoHeight ? 'auto' : element.h,
         minHeight: autoHeight ? 40 : undefined,
         zIndex: element.zIndex,
+        ...colorStyle,
       }}
     >
       <ElementBody element={element} editing={editing} />
+
+      {/* labels — chips above the card */}
+      {labels.length > 0 && (
+        <div className="pointer-events-none absolute bottom-full left-1 mb-1 flex max-w-full flex-wrap gap-1">
+          {labels.map((label) => (
+            <span
+              key={label}
+              className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium leading-none text-accent shadow-sm"
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* reactions — chips below the card (click to add another) */}
+      {reactionEntries.length > 0 && (
+        <div className="absolute right-1 top-full mt-1 flex flex-wrap justify-end gap-1">
+          {reactionEntries.map(([emoji, n]) => (
+            <button
+              key={emoji}
+              type="button"
+              aria-label={`${emoji} reaction (${n})`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => addReaction(emoji)}
+              className="flex items-center gap-0.5 rounded-full border border-card-border bg-card px-1.5 py-0.5 text-[11px] leading-none shadow-sm hover:bg-panel-border/40"
+            >
+              <span>{emoji}</span>
+              {n > 1 && <span className="text-ink-soft">{n}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* lock badge */}
+      {locked && (
+        <div className="pointer-events-none absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full border border-card-border bg-card text-ink-soft shadow-sm">
+          <Lock className="h-3 w-3" />
+        </div>
+      )}
     </div>
   );
 });

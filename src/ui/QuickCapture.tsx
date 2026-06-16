@@ -10,7 +10,7 @@ import { createImageElement, createLinkElement, normalizeUrl } from '@/elements/
 import { screenToWorld } from '@/canvas/coords';
 
 /** Find or create the pinned "Inbox" board (id remembered in meta). */
-async function ensureInboxBoard(): Promise<string> {
+export async function ensureInboxBoard(): Promise<string> {
   const existing = await getMeta<string>('inboxBoardId');
   if (existing && useStore.getState().boards[existing]) return existing;
   const found = Object.values(useStore.getState().boards).find(

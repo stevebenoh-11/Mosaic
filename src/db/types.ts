@@ -15,7 +15,8 @@ export type ElementType =
   | 'line'
   | 'drawing'
   | 'boardLink'
-  | 'comment';
+  | 'comment'
+  | 'document';
 
 export interface Board {
   id: string;
@@ -36,6 +37,14 @@ export interface TipTapDoc {
 
 export interface NoteContent {
   doc: TipTapDoc;
+}
+/**
+ * Document = a long-form note with its own title and an expanded editor view.
+ * Shares TipTap doc storage with notes so the rich-text pipeline is reused.
+ */
+export interface DocumentContent {
+  doc: TipTapDoc;
+  title: string;
 }
 export interface TitleContent {
   text: string;
@@ -61,24 +70,43 @@ export interface TodoItem {
 export interface TodoContent {
   title?: string;
   items: TodoItem[];
+  /** Whole-list due date (ms epoch). */
+  dueDate?: number;
+  /** Assignee — a free-text name (or user id when auth exists). */
+  assigneeId?: string;
 }
 export interface ColumnContent {
   title: string;
   collapsed: boolean;
 }
+/** How a swatch renders its colour value caption. */
+export type ColorFormat = 'hex' | 'rgb' | 'hsl' | 'off';
 export interface SwatchContent {
   hex: string;
   label?: string;
+  /** Longer descriptive caption shown under the colour. */
+  caption?: string;
+  /** Value display format (default 'hex'). */
+  format?: ColorFormat;
 }
 export type LineEndpoint =
   | { elementId: string; side?: 'n' | 'e' | 's' | 'w' }
   | { point: { x: number; y: number } };
+/** Endpoint cap styles for connector lines. */
+export type LineMarker = 'none' | 'arrow' | 'circle' | 'square';
 export interface LineContent {
   from: LineEndpoint;
   to: LineEndpoint;
   curve: boolean;
   dashed: boolean;
+  /** Legacy end-arrow toggle. `endMarker` overrides it when set. */
   arrowEnd: boolean;
+  /** Stroke colour (default theme grey when unset). */
+  color?: string;
+  startMarker?: LineMarker;
+  endMarker?: LineMarker;
+  /** Optional label rendered at the line midpoint. */
+  label?: string;
 }
 export interface DrawingPath {
   points: number[]; // flat [x0, y0, x1, y1, ...] in element-local coords
@@ -91,14 +119,26 @@ export interface DrawingContent {
 export interface BoardLinkContent {
   boardId: string;
 }
+/** A single reply under a comment thread. */
+export interface CommentReply {
+  id: string;
+  authorName: string;
+  doc: TipTapDoc;
+  createdAt: number;
+}
 export interface CommentContent {
   doc: TipTapDoc;
   authorName: string;
   resolved: boolean;
+  /** When the root comment was written (ms epoch). */
+  createdAt?: number;
+  /** Threaded replies, oldest first. */
+  replies?: CommentReply[];
 }
 
 export type ElementContent =
   | NoteContent
+  | DocumentContent
   | TitleContent
   | ImageContent
   | LinkContent
@@ -111,7 +151,14 @@ export type ElementContent =
   | CommentContent;
 
 export interface ElementStyle {
+  /** Card background tint (hex). */
   color?: string;
+  /** When true the element can't be moved, resized or edited. */
+  locked?: boolean;
+  /** Free-text labels/tags shown on the card. */
+  labels?: string[];
+  /** Emoji reaction counts, keyed by emoji. */
+  reactions?: Record<string, number>;
 }
 
 export interface Element {

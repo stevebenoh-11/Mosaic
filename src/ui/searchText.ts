@@ -1,6 +1,7 @@
 import type {
   ColumnContent,
   CommentContent,
+  DocumentContent,
   Element,
   LinkContent,
   SwatchContent,
@@ -21,11 +22,21 @@ export function docText(doc: TipTapDoc): string {
   return parts.join(' ');
 }
 
+/** Number of words in a rich-text doc. */
+export function wordCount(doc: TipTapDoc): number {
+  const text = docText(doc).trim();
+  return text ? text.split(/\s+/).length : 0;
+}
+
 /** Searchable plain text of an element (empty string = not searchable). */
 export function elementText(el: Element): string {
   switch (el.type) {
     case 'note':
       return docText((el.content as { doc: TipTapDoc }).doc);
+    case 'document': {
+      const c = el.content as DocumentContent;
+      return [c.title, docText(c.doc)].join(' ');
+    }
     case 'title':
       return (el.content as TitleContent).text;
     case 'todo': {

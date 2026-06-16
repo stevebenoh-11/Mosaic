@@ -11,6 +11,10 @@ import { SyncOnboarding } from '@/ui/SyncOnboarding';
 import { initSync } from '@/sync';
 import { useUiStore } from '@/ui/uiStore';
 import { CanvasView } from '@/canvas/CanvasView';
+import { DocumentModal } from '@/elements/document/DocumentModal';
+import { ActivityPanel } from '@/ui/ActivityPanel';
+import { QuickNotesPanel } from '@/ui/QuickNotesPanel';
+import { BoardOverview } from '@/ui/BoardOverview';
 
 function BoardPage() {
   const { boardId } = useParams<'boardId'>();
@@ -33,6 +37,7 @@ function BoardPage() {
       <QuickCapture boardId={boardId} />
       <SyncOnboarding />
       <ShortcutsPanel />
+      <DocumentModal />
     </>
   );
 }
@@ -130,12 +135,15 @@ export default function App() {
         <main className="relative flex min-h-0 flex-1">
           <Routes>
             <Route path="/" element={<HomeRedirect />} />
+            <Route path="/boards" element={<BoardOverview />} />
             <Route path="/b/:boardId" element={<BoardPage />} />
             <Route path="*" element={<HomeRedirect />} />
           </Routes>
         </main>
         <CommandPalette />
       </div>
+      <ActivityPanel />
+      <QuickNotesPanel />
     </div>
   );
 }

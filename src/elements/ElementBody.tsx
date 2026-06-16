@@ -1,5 +1,7 @@
 import type { Element } from '@/db/types';
+import { COLUMNABLE_TYPES } from '@/store/elementCommands';
 import { NoteCard } from './note/NoteCard';
+import { DocumentCard } from './document/DocumentCard';
 import { TitleCard } from './title/TitleCard';
 import { SwatchCard } from './swatch/SwatchCard';
 import { ImageCard } from './image/ImageCard';
@@ -20,6 +22,8 @@ export function ElementBody({
   switch (element.type) {
     case 'note':
       return <NoteCard element={element} editing={editing} />;
+    case 'document':
+      return <DocumentCard element={element} editing={editing} />;
     case 'title':
       return <TitleCard element={element} editing={editing} />;
     case 'swatch':
@@ -44,12 +48,4 @@ export function ElementBody({
 }
 
 /** Types that may live inside a column. */
-export const COLUMNABLE = new Set([
-  'note',
-  'title',
-  'image',
-  'link',
-  'todo',
-  'swatch',
-  'boardLink',
-]);
+export const COLUMNABLE = COLUMNABLE_TYPES;

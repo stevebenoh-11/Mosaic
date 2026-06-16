@@ -46,6 +46,15 @@ interface UiState {
   /** A freshly-created comment to open for editing (consumed by the canvas). */
   pendingCommentOpen: string | null;
   setPendingCommentOpen(id: string | null): void;
+  /** Document element open in the expanded full-screen editor. */
+  openDocumentId: string | null;
+  setOpenDocumentId(id: string | null): void;
+  /** Whether the Activity panel drawer is open. */
+  activityOpen: boolean;
+  setActivityOpen(open: boolean): void;
+  /** Whether the Quick Notes panel is open. */
+  quickNotesOpen: boolean;
+  setQuickNotesOpen(open: boolean): void;
   shortcutsOpen: boolean;
   setShortcutsOpen(open: boolean): void;
   /** Tool being dragged from the toolbar (ghost preview follows pointer). */
@@ -97,6 +106,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   setFlashElementId: (flashElementId) => set({ flashElementId }),
   pendingCommentOpen: null,
   setPendingCommentOpen: (pendingCommentOpen) => set({ pendingCommentOpen }),
+  openDocumentId: null,
+  setOpenDocumentId: (openDocumentId) => set({ openDocumentId }),
+  activityOpen: false,
+  setActivityOpen: (activityOpen) => set({ activityOpen }),
+  quickNotesOpen: false,
+  setQuickNotesOpen: (quickNotesOpen) => set({ quickNotesOpen }),
   shortcutsOpen: false,
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   draggingTool: null,

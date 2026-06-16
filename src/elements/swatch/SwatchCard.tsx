@@ -1,7 +1,9 @@
 import { memo, useEffect, useState } from 'react';
 import { useStore } from '@/store';
-import type { Element, SwatchContent } from '@/db/types';
-import { hexToHsl, hslToHex, type Hsl } from './color';
+import type { ColorFormat, Element, SwatchContent } from '@/db/types';
+import { formatColor, hexToHsl, hslToHex, type Hsl } from './color';
+
+const FORMATS: ColorFormat[] = ['hex', 'rgb', 'hsl', 'off'];
 
 /** Curated palette shown on the card for one-click colour swapping. */
 const PRESETS = [
@@ -125,27 +127,59 @@ export const SwatchCard = memo(function SwatchCard({
           </div>
         )}
       </div>
-      <div className="px-2 py-1.5 text-xs text-ink-soft">
+      <div className="flex flex-col gap-1 px-2 py-1.5 text-xs text-ink-soft">
         {editing ? (
-          <input
-            value={c.label ?? ''}
-            placeholder="Label"
-            aria-label="Swatch label"
-            onPointerDown={(e) => e.stopPropagation()}
-            onChange={(e) => commitSwatch(element, { label: e.target.value }, 'Edit label')}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter' || e.key === 'Escape') {
-                useStore.getState().setEditing(null);
-              }
-            }}
-            className="w-full bg-transparent outline-none"
-          />
+          <>
+            <input
+              value={c.label ?? ''}
+              placeholder="Name"
+              aria-label="Swatch name"
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => commitSwatch(element, { label: e.target.value }, 'Edit label')}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') useStore.getState().setEditing(null);
+              }}
+              className="w-full bg-transparent font-medium text-ink outline-none"
+            />
+            <input
+              value={c.caption ?? ''}
+              placeholder="Caption"
+              aria-label="Swatch caption"
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => commitSwatch(element, { caption: e.target.value }, 'Edit caption')}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Escape') useStore.getState().setEditing(null);
+              }}
+              className="w-full bg-transparent outline-none"
+            />
+            <div className="flex gap-0.5">
+              {FORMATS.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  aria-label={`Show ${f}`}
+                  onClick={() => commitSwatch(element, { format: f }, 'Change format')}
+                  className={`rounded px-1.5 py-0.5 text-[10px] uppercase ${
+                    (c.format ?? 'hex') === f
+                      ? 'bg-accent-soft text-accent'
+                      : 'text-ink-soft hover:bg-panel-border/60'
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </>
         ) : (
-          <span className="block truncate">
-            {c.label ? `${c.label} · ` : ''}
-            {c.hex.toUpperCase()}
-          </span>
+          <>
+            {c.label && <span className="block truncate font-medium text-ink">{c.label}</span>}
+            {(c.format ?? 'hex') !== 'off' && (
+              <span className="block truncate">{formatColor(c.hex, c.format)}</span>
+            )}
+            {c.caption && <span className="block truncate text-ink-soft/80">{c.caption}</span>}
+          </>
         )}
       </div>
     </div>

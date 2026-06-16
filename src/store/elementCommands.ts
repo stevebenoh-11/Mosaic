@@ -1,6 +1,53 @@
 import { newId } from '@/db/ids';
-import type { Element, ElementContent, ElementType } from '@/db/types';
+import type {
+  Element,
+  ElementContent,
+  ElementStyle,
+  ElementType,
+  LineContent,
+} from '@/db/types';
 import type { Change, Command } from './commands';
+
+/**
+ * Expand a target set with the elements that depend on it: column children go
+ * with their column, and lines/comments referencing a victim go with it. Used
+ * by cut / copy / delete so dependents don't dangle.
+ */
+export function withDependents(
+  elements: Record<string, Element>,
+  boardId: string,
+  targets: Element[],
+): Element[] {
+  const ids = new Set(targets.map((e) => e.id));
+  const all = [...targets];
+  for (const el of Object.values(elements)) {
+    if (el.boardId !== boardId || ids.has(el.id)) continue;
+    if (el.parentColumnId && ids.has(el.parentColumnId)) {
+      ids.add(el.id);
+      all.push(el);
+    }
+  }
+  for (const el of Object.values(elements)) {
+    if (el.boardId !== boardId || ids.has(el.id)) continue;
+    if (el.type === 'line') {
+      const c = el.content as LineContent;
+      const refs = [c.from, c.to].some(
+        (end) => 'elementId' in end && ids.has(end.elementId),
+      );
+      if (refs) {
+        ids.add(el.id);
+        all.push(el);
+      }
+    } else if (el.type === 'comment') {
+      const c = el.content as { targetElementId?: string };
+      if (c.targetElementId && ids.has(c.targetElementId)) {
+        ids.add(el.id);
+        all.push(el);
+      }
+    }
+  }
+  return all;
+}
 
 /** Default sizes per element type (world units = px at 100%). */
 export const DEFAULT_SIZES: Record<ElementType, { w: number; h: number }> = {
@@ -15,6 +62,7 @@ export const DEFAULT_SIZES: Record<ElementType, { w: number; h: number }> = {
   drawing: { w: 300, h: 200 },
   boardLink: { w: 180, h: 110 },
   comment: { w: 36, h: 36 },
+  document: { w: 220, h: 150 },
 };
 
 export function emptyNoteDoc(): ElementContent {
@@ -25,10 +73,12 @@ export function defaultContent(type: ElementType): ElementContent {
   switch (type) {
     case 'note':
       return emptyNoteDoc();
+    case 'document':
+      return { doc: { type: 'doc', content: [{ type: 'paragraph' }] }, title: 'New Document' };
     case 'title':
       return { text: '' };
     case 'todo':
-      return { items: [] };
+      return { title: 'New To-do List', items: [] };
     case 'column':
       return { title: 'Column', collapsed: false };
     case 'swatch':
@@ -205,4 +255,75 @@ export function zOrderCmd(
   }
   if (changes.length === 0) return null;
   return { label: 'Reorder', changes };
+}
+
+/** Element types that may be stacked inside a column. */
+export const COLUMNABLE_TYPES = new Set<ElementType>([
+  'note',
+  'title',
+  'image',
+  'link',
+  'todo',
+  'swatch',
+  'boardLink',
+  'document',
+]);
+
+/** Merge a partial style onto each element (colour, lock, labels, reactions). */
+export function updateStyleCmd(
+  label: string,
+  elements: Element[],
+  patch: Partial<ElementStyle>,
+  coalesceKey?: string,
+): Command {
+  const cmd: Command = {
+    label,
+    changes: elements.map(
+      (e): Change => ({
+        entity: 'element',
+        id: e.id,
+        before: e,
+        after: { ...e, style: { ...e.style, ...patch } },
+      }),
+    ),
+  };
+  if (coalesceKey !== undefined) cmd.coalesceKey = coalesceKey;
+  return cmd;
+}
+
+/**
+ * Wrap the selected (column-able) elements in a new column. Returns the command
+ * and the new column id, or null when nothing groupable is selected.
+ */
+export function groupIntoColumnCmd(
+  selected: Element[],
+  maxZ: number,
+): { command: Command; columnId: string } | null {
+  const children = selected.filter(
+    (e) => COLUMNABLE_TYPES.has(e.type) && e.parentColumnId === null,
+  );
+  if (children.length === 0) return null;
+  const boardId = children[0]!.boardId;
+  const bx = Math.min(...children.map((e) => e.x));
+  const by = Math.min(...children.map((e) => e.y));
+  const ordered = [...children].sort((a, b) => a.y - b.y || a.x - b.x);
+
+  const column = buildElement(boardId, 'column', bx, by, maxZ + 1, {
+    content: { title: 'New Column', collapsed: false },
+  });
+  const changes: Change[] = [
+    { entity: 'element', id: column.id, before: null, after: column },
+    ...ordered.map(
+      (e, i): Change => ({
+        entity: 'element',
+        id: e.id,
+        before: e,
+        after: { ...e, parentColumnId: column.id, sortIndex: i },
+      }),
+    ),
+  ];
+  return {
+    command: { label: 'Group into column', changes },
+    columnId: column.id,
+  };
 }

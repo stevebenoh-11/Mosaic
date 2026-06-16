@@ -10,6 +10,8 @@ import {
   List,
   ListChecks,
   ListOrdered,
+  Strikethrough,
+  Underline as UnderlineIcon,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -38,7 +40,14 @@ function ToolButton({
   );
 }
 
-export function BubbleToolbar({ editor }: { editor: Editor }) {
+export function BubbleToolbar({
+  editor,
+  floating = true,
+}: {
+  editor: Editor;
+  /** When false, render as a static inline bar (used in the document modal). */
+  floating?: boolean;
+}) {
   function setLink() {
     const prev = editor.getAttributes('link').href as string | undefined;
     const url = window.prompt('Link URL', prev ?? 'https://');
@@ -60,7 +69,11 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
   const c = () => editor.chain().focus();
   return (
     <div
-      className="absolute -top-10 left-0 z-50 flex items-center gap-0.5 rounded-lg border border-card-border bg-card px-1 py-0.5 shadow-card-drag"
+      className={
+        floating
+          ? 'absolute bottom-full left-0 z-50 mb-2 flex flex-wrap items-center gap-0.5 rounded-lg border border-card-border bg-card px-1 py-0.5 shadow-card-drag'
+          : 'mb-3 flex flex-wrap items-center gap-0.5 rounded-lg border border-card-border bg-panel px-1 py-1'
+      }
       onPointerDown={(e) => e.stopPropagation()}
     >
       <ToolButton label="Bold" active={editor.isActive('bold')} onClick={() => c().toggleBold().run()}>
@@ -68,6 +81,12 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
       </ToolButton>
       <ToolButton label="Italic" active={editor.isActive('italic')} onClick={() => c().toggleItalic().run()}>
         <Italic className="h-3.5 w-3.5" />
+      </ToolButton>
+      <ToolButton label="Underline" active={editor.isActive('underline')} onClick={() => c().toggleUnderline().run()}>
+        <UnderlineIcon className="h-3.5 w-3.5" />
+      </ToolButton>
+      <ToolButton label="Strikethrough" active={editor.isActive('strike')} onClick={() => c().toggleStrike().run()}>
+        <Strikethrough className="h-3.5 w-3.5" />
       </ToolButton>
       <span className="mx-0.5 h-4 w-px bg-card-border" />
       <ToolButton label="Heading 1" active={editor.isActive('heading', { level: 1 })} onClick={() => c().toggleHeading({ level: 1 }).run()}>
